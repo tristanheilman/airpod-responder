@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS("14.0")],
     targets: [
         .target(name: "NavigatorCore"),
+        .executableTarget(name: "ReplayHarness", dependencies: ["NavigatorCore"]),
         .testTarget(name: "NavigatorCoreTests", dependencies: ["NavigatorCore"]),
     ]
 )
