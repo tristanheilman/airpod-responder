@@ -1,0 +1,45 @@
+import Foundation
+
+public enum Tier: String, Sendable, Codable, Equatable, CaseIterable {
+    /// Speech, and the agent waits for the answer.
+    case decisionPoint
+    /// Speech: the agent is stopped and needs you.
+    case needsInput
+    /// Speech: worth saying, but nothing is blocked on it.
+    case speak
+    /// A sound, no words.
+    case earcon
+    /// Held for the next `status` request.
+    case silentQueue
+    /// Nothing at all.
+    case silent
+
+    public var isSpeech: Bool {
+        switch self {
+        case .decisionPoint, .needsInput, .speak: true
+        case .earcon, .silentQueue, .silent: false
+        }
+    }
+
+    public var isBlocking: Bool { self == .decisionPoint }
+}
+
+public enum PermissionDecision: String, Sendable, Codable, Equatable {
+    case allow
+    case deny
+    case ask
+    case `defer`
+}
+
+public struct TierVerdict: Sendable, Equatable {
+    public let tier: Tier
+    /// Only `PreToolUse` produces a permission verdict; nil for every other event.
+    public let permission: PermissionDecision?
+    public let reason: String
+
+    public init(tier: Tier, permission: PermissionDecision?, reason: String) {
+        self.tier = tier
+        self.permission = permission
+        self.reason = reason
+    }
+}
