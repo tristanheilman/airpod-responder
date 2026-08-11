@@ -18,6 +18,13 @@
 - **Every decision produces a `DecisionRecord`**, including suppressed ones and silent ones.
 - All public types are `Sendable`. All enums with associated values are `Equatable`.
 - Swift Testing only. Do not use XCTest.
+- **`#expect` cannot contain a `mutating` call.** The macro expands its argument
+  into a closure whose captured receiver is immutable, so
+  `#expect(bucket.tryConsume(at: t0))` fails to compile with "cannot use mutating
+  member on immutable value: '$0' is immutable". Hoist the call into a `let`
+  first and assert on that. This applies to `TokenBucket.tryConsume`,
+  `SpeechBudget.admit`, `FailureCoalescer.admit`, and
+  `ThrashDetector.recordFailure`.
 - Package platform floor is `.macOS("14.0")`. The core is pure and must stay buildable without the daemon's macOS 26 dependencies.
 
 ---
