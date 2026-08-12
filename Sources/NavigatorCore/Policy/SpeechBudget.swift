@@ -8,7 +8,13 @@ import Foundation
 public struct SpeechBudget: Sendable {
     private var bucket: TokenBucket
 
-    public init(capacity: Double = 1, interval: TimeInterval = 300, startingAt: Date) {
+    /// Defaults deliberately mirror `PolicyConfig.default` rather than
+    /// restating numbers — two independent defaults for one concept drift.
+    public init(
+        capacity: Double = PolicyConfig.default.speechCapacity,
+        interval: TimeInterval = PolicyConfig.default.speechInterval,
+        startingAt: Date
+    ) {
         self.bucket = TokenBucket(
             capacity: capacity, refillPerSecond: 1 / interval, startingAt: startingAt)
     }

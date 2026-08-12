@@ -75,8 +75,19 @@ import Testing
     @Test func budgetRecoversAfterTheInterval() {
         var budget = SpeechBudget(startingAt: t0)
         _ = budget.admit(.speak, at: t0)
-        let later = budget.admit(.speak, at: t0.addingTimeInterval(300))
+        // Reads the interval from config rather than restating it, so changing
+        // the default does not silently turn this into a no-op assertion.
+        let later = budget.admit(
+            .speak, at: t0.addingTimeInterval(PolicyConfig.default.speechInterval))
         #expect(later == .speak)
+    }
+
+    @Test func budgetHasNotRecoveredJustBeforeTheInterval() {
+        var budget = SpeechBudget(startingAt: t0)
+        _ = budget.admit(.speak, at: t0)
+        let tooSoon = budget.admit(
+            .speak, at: t0.addingTimeInterval(PolicyConfig.default.speechInterval - 1))
+        #expect(tooSoon == .earcon)
     }
 
     @Test func needsInputIsRationedToo() {
