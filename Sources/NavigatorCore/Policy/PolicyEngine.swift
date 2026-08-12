@@ -16,6 +16,7 @@ public struct PolicyEngine: Sendable {
     private var questionAskedAt: Date?
     private let questionDeadline: TimeInterval
     private let recentLogCapacity: Int
+    private let canAcceptAnswers: Bool
 
     public init(
         config: PolicyConfig = .default,
@@ -25,6 +26,7 @@ public struct PolicyEngine: Sendable {
         self.reversibilityClassifier = ReversibilityClassifier(userRules: userRules)
         self.questionDeadline = config.questionDeadline
         self.recentLogCapacity = max(1, config.recentLogCapacity)
+        self.canAcceptAnswers = config.canAcceptAnswers
         self.budget = SpeechBudget(
             capacity: config.speechCapacity,
             interval: config.speechInterval,
@@ -177,7 +179,11 @@ public struct PolicyEngine: Sendable {
 
         switch verdict.tier {
         case .decisionPoint:
-            return "\(name) wants to \(verdict.reason). Approve?"
+            // Only ask when an answer can reach us. Otherwise this is a heads-up
+            // and should say so, or it invites a reply into a void.
+            return canAcceptAnswers
+                ? "\(name) wants to \(verdict.reason). Approve?"
+                : "\(name) is about to \(verdict.reason). Check your screen." 
         case .needsInput:
             return "\(name) needs you."
         case .speak:

@@ -161,7 +161,8 @@ import Testing
         let decision = subject.decide(
             StampedEvent(event: bash("git push --force origin main"), at: t0))
 
-        #expect(decision.utterance == "p wants to force push, which rewrites remote history. Approve?")
+        #expect(decision.utterance
+            == "p is about to force push, which rewrites remote history. Check your screen.")
     }
 
     @Test func offRouteSentenceReadsAsOneClause() {
@@ -410,5 +411,52 @@ extension PolicyEngineBehavior {
         var subject = engine()
         _ = subject.decide(StampedEvent(event: bash("swift build"), at: t0))
         #expect(subject.log.last?.detail == nil)
+    }
+}
+
+@Suite struct PhrasingMatchesCapability {
+    let t0 = Date(timeIntervalSince1970: 1_770_000_000)
+
+    private func engine(_ config: PolicyConfig) -> PolicyEngine {
+        var engine = PolicyEngine(config: config, startingAt: t0)
+        _ = engine.decide(StampedEvent(
+            event: HookEvent(kind: .sessionStart, sessionID: "s1", cwd: "/p"), at: t0))
+        return engine
+    }
+
+    private func force(_ subject: inout PolicyEngine) -> Decision {
+        subject.decide(StampedEvent(
+            event: HookEvent(
+                kind: .preToolUse, sessionID: "s1", cwd: "/p", toolName: "Bash",
+                toolInput: ["command": .string("git push --force")]),
+            at: t0))
+    }
+
+    @Test func itDoesNotAskAQuestionItCannotHearTheAnswerTo() {
+        // It asked "Approve?" while having no microphone input and a closed
+        // wire gate. Someone answered out loud, reasonably, and nothing
+        // happened — the tool was describing a capability it does not have.
+        var subject = engine(.default)
+        let decision = force(&subject)
+
+        #expect(decision.utterance?.contains("Approve?") == false)
+        #expect(decision.utterance?.contains("screen") == true,
+                "got: \(decision.utterance ?? "nil")")
+    }
+
+    @Test func itAsksOnceItCanActuallyTakeAnAnswer() {
+        var config = PolicyConfig.default
+        config.canAcceptAnswers = true
+        var subject = engine(config)
+        let decision = force(&subject)
+
+        #expect(decision.utterance?.contains("Approve?") == true)
+    }
+
+    @Test func theHeadsUpStillSaysWhatIsHappening() {
+        var subject = engine(.default)
+        let decision = force(&subject)
+        #expect(decision.utterance?.contains("force push") == true)
+        #expect(decision.utterance?.contains("p") == true)
     }
 }

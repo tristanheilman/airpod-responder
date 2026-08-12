@@ -17,6 +17,14 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
     public var thrashRepeatThreshold: Int
     public var thrashMinimumDuration: TimeInterval
 
+    /// Whether an answer can actually reach the tool.
+    ///
+    /// False until both a voice or stem channel exists *and* the wire gate is
+    /// open. It governs phrasing only, and it matters: saying "Approve?" with no
+    /// microphone and a closed gate invites someone to answer out loud and get
+    /// nothing, which is worse than saying less.
+    public var canAcceptAnswers: Bool
+
     /// How many recent decisions the engine keeps in memory.
     ///
     /// The daemon only ever reads the most recent one; the durable record is the
@@ -48,6 +56,7 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
         thrashMinimumDuration: TimeInterval = 180,
         questionDeadline: TimeInterval = 20,
         recentLogCapacity: Int = 500,
+        canAcceptAnswers: Bool = false,
         emitDecisions: Bool = false
     ) {
         self.speechCapacity = speechCapacity
@@ -57,6 +66,7 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
         self.thrashMinimumDuration = thrashMinimumDuration
         self.questionDeadline = questionDeadline
         self.recentLogCapacity = recentLogCapacity
+        self.canAcceptAnswers = canAcceptAnswers
         self.emitDecisions = emitDecisions
     }
 
