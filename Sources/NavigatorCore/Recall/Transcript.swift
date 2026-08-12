@@ -40,18 +40,75 @@ public struct Transcript: Sendable {
             .joined(separator: " ")
     }
 
+    /// Spoken summary of what every live session is doing.
+    ///
+    /// Grouped by project, because sessions are named after their directory and
+    /// two windows on one repo is normal. Ungrouped it said "2 sessions:
+    /// airpod-responder, working. airpod-responder, working." — the same name
+    /// twice, telling you nothing.
     public func statusDigest(sessions: [Session], at now: Date) -> String {
         guard !sessions.isEmpty else { return "No active sessions." }
 
-        let parts = sessions.map { session -> String in
+        var order: [String] = []
+        var groups: [String: [SessionState]] = [:]
+
+        for session in sessions {
             let name = Self.name(of: session)
-            let idle = Int(now.timeIntervalSince(session.lastEventAt))
-            return idle > 120
-                ? "\(name), quiet for \(idle / 60) minutes"
-                : "\(name), working"
+            if groups[name] == nil { order.append(name) }
+            groups[name, default: []].append(Self.state(of: session, at: now))
         }
-        return "\(sessions.count) session\(sessions.count == 1 ? "" : "s"): "
-            + parts.joined(separator: ". ") + "."
+
+        let parts = order.map { name -> String in
+            let states = groups[name] ?? []
+
+            // One session: a full sentence reads best — "app is working".
+            if states.count == 1 { return "\(name) \(states[0].sentence)" }
+
+            // Several in the same state: the bare form composes after a
+            // quantifier, where the sentence form would give "all is working".
+            if Set(states).count == 1 {
+                let quantity = states.count == 2 ? "both" : "all"
+                return "\(states.count) sessions in \(name), \(quantity) \(states[0].bare)"
+            }
+
+            return "\(name) has \(states.count) sessions: "
+                + states.map(\.bare).joined(separator: ", ")
+        }
+
+        return parts.joined(separator: ". ") + "."
+    }
+
+    private enum SessionState: Equatable, Hashable {
+        case working
+        case quiet(minutes: Int)
+
+        /// After a quantifier: "both working", "all quiet for 3 minutes".
+        var bare: String {
+            switch self {
+            case .working: "working"
+            case .quiet(let minutes): "quiet for \(minutes) minute\(minutes == 1 ? "" : "s")"
+            }
+        }
+
+        /// On its own: "app is working", "app has been quiet for 3 minutes".
+        var sentence: String {
+            switch self {
+            case .working: "is working"
+            case .quiet(let minutes):
+                "has been quiet for \(minutes) minute\(minutes == 1 ? "" : "s")"
+            }
+        }
+    }
+
+    /// 90 seconds, not 120: at a two-minute threshold integer division can never
+    /// yield "1 minute", so the singular was unreachable and the shortest thing
+    /// it could ever report was "quiet for 2 minutes".
+    private static let quietAfter: TimeInterval = 90
+
+    private static func state(of session: Session, at now: Date) -> SessionState {
+        let idle = now.timeIntervalSince(session.lastEventAt)
+        guard idle >= quietAfter else { return .working }
+        return .quiet(minutes: Int(idle) / 60)
     }
 
     public static func name(of session: Session) -> String {

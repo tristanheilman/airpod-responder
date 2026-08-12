@@ -93,13 +93,66 @@ import Testing
     @Test func statusDigestCallsOutAQuietSession() {
         let transcript = Transcript()
         let sessions = [
-            Session(id: "a", cwd: "/Users/t/Projects/app",
-                    startedAt: t0, lastEventAt: t0),
+            Session(id: "a", cwd: "/Users/t/Projects/app", startedAt: t0, lastEventAt: t0),
         ]
-        // Ten minutes since the last event is the thing worth knowing.
         let status = transcript.statusDigest(
             sessions: sessions, at: t0.addingTimeInterval(600))
 
         #expect(status.contains("10 minutes"))
+    }
+
+    @Test func twoSessionsInOneProjectAreGrouped() {
+        // Two Claude Code windows on one repo is ordinary. Ungrouped this said
+        // the same directory name twice and conveyed nothing.
+        let transcript = Transcript()
+        let sessions = [
+            Session(id: "a", cwd: "/Users/t/Projects/app", startedAt: t0, lastEventAt: t0),
+            Session(id: "b", cwd: "/Users/t/Projects/app", startedAt: t0, lastEventAt: t0),
+        ]
+        let status = transcript.statusDigest(sessions: sessions, at: t0)
+
+        #expect(status == "2 sessions in app, both working.")
+    }
+
+    @Test func threeInOneProjectReadsAsAll() {
+        let transcript = Transcript()
+        let sessions = (0..<3).map {
+            Session(id: "s\($0)", cwd: "/Users/t/Projects/app",
+                    startedAt: t0, lastEventAt: t0)
+        }
+        #expect(transcript.statusDigest(sessions: sessions, at: t0)
+            == "3 sessions in app, all working.")
+    }
+
+    @Test func mixedStatesInOneProjectAreSpelledOut() {
+        let transcript = Transcript()
+        let sessions = [
+            Session(id: "a", cwd: "/Users/t/Projects/app",
+                    startedAt: t0, lastEventAt: t0.addingTimeInterval(600)),
+            Session(id: "b", cwd: "/Users/t/Projects/app",
+                    startedAt: t0, lastEventAt: t0),
+        ]
+        let status = transcript.statusDigest(
+            sessions: sessions, at: t0.addingTimeInterval(600))
+
+        #expect(status == "app has 2 sessions: working, quiet for 10 minutes.")
+    }
+
+    @Test func aSingleSessionNeedsNoCount() {
+        let transcript = Transcript()
+        let sessions = [
+            Session(id: "a", cwd: "/Users/t/Projects/app", startedAt: t0, lastEventAt: t0),
+        ]
+        #expect(transcript.statusDigest(sessions: sessions, at: t0) == "app is working.")
+    }
+
+    @Test func oneMinuteIsNotPluralised() {
+        let transcript = Transcript()
+        let sessions = [
+            Session(id: "a", cwd: "/Users/t/Projects/app", startedAt: t0, lastEventAt: t0),
+        ]
+        let status = transcript.statusDigest(
+            sessions: sessions, at: t0.addingTimeInterval(95))
+        #expect(status.contains("1 minute."), "got: \(status)")
     }
 }
