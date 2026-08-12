@@ -71,8 +71,10 @@ public struct TierAssigner: Sendable {
 
         case (.irreversible(let how), .offRoute(let why)):
             // Lead with the route reason: that it is off-route is the surprising
-            // part, and it is what you need first to decide.
-            return TierVerdict(tier: .decisionPoint, permission: .defer, reason: "\(why) — \(how)")
+            // part, and it is what you need first to decide. Joined with "and"
+            // rather than a dash so it survives being read aloud.
+            return TierVerdict(
+                tier: .decisionPoint, permission: .defer, reason: "\(why), and \(how)")
 
         case (.unknown, _):
             return TierVerdict(tier: .silent, permission: .defer, reason: "unknown")

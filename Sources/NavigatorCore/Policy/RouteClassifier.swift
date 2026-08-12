@@ -25,6 +25,9 @@ public struct RouteClassifier: Sendable {
         for dir in permitted where PathNormalizer.contains(dir: dir, path: path) {
             return .onRoute
         }
-        return .offRoute(reason: "writes to \(path), outside \(session.cwd)")
+        // Base-form verb phrase, like the reversibility reasons: these get read
+        // aloud after "wants to", and "wants to writes to" is what you would
+        // actually hear otherwise.
+        return .offRoute(reason: "write to \(path), outside \(session.cwd)")
     }
 }

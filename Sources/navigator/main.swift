@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import NavigatorAudio
 import NavigatorCore
 import NavigatorIO
 
@@ -7,16 +8,28 @@ let home = NSHomeDirectory() as NSString
 let defaultSocket = home.appendingPathComponent(".claude/navigator.sock")
 let defaultLogDir = URL(fileURLWithPath: home.appendingPathComponent(".claude/navigator"))
 let settingsPath = home.appendingPathComponent(".claude/settings.json")
+let configPath = defaultLogDir.appendingPathComponent("config.json")
 
 func usage() -> Never {
     FileHandle.standardError.write(Data("""
     usage: navigator <command>
 
+    daemon
       run                   start the daemon in the foreground
+      status                report whether a daemon is listening
+
+    listening
+      repeat                say the last thing you were told again
+      catch-up              everything since you last asked
+      sessions              what every live session is doing
+      say <text>            speak something, to check the audio path
+      mute / unmute         stop and start talking
+
+    setup
       install [--apply]     copy binaries to a stable prefix and register hooks
               [--prefix P]  where to copy them (default ~/.claude/bin)
       uninstall [--apply]   remove this tool's hooks from settings.json
-      status                report whether a daemon is listening
+      config [--write]      show the live settings; --write creates the file
 
     install and uninstall print what they would do and change nothing without
     --apply. install backs settings.json up first.
@@ -26,6 +39,30 @@ func usage() -> Never {
 
     """.utf8))
     exit(2)
+}
+
+/// Sends a control command to a running daemon and prints its reply.
+func sendControl(_ command: NavigatorCommand, argument: String? = nil) -> Never {
+    let socketPath = ProcessInfo.processInfo.environment["NAVIGATOR_SOCKET"] ?? defaultSocket
+
+    guard let socket = try? UnixSocket.connect(to: socketPath, timeout: 0.5) else {
+        print("no daemon on \(socketPath) — start one with: navigator run")
+        exit(1)
+    }
+    defer { socket.close() }
+
+    let request = NavigatorRequest.control(command, argument: argument, at: Date())
+    guard let line = try? NavigatorMessage.encodeLine(request),
+          (try? socket.write(line)) != nil,
+          let reply = try? socket.readLine(deadline: 5),
+          let response = try? NavigatorMessage.decode(reply, as: NavigatorResponse.self)
+    else {
+        print("daemon did not answer")
+        exit(1)
+    }
+
+    print(response.message ?? "")
+    exit(0)
 }
 
 let arguments = CommandLine.arguments
@@ -40,10 +77,12 @@ case "run":
     setvbuf(stdout, nil, _IOLBF, 0)
 
     let socketPath = ProcessInfo.processInfo.environment["NAVIGATOR_SOCKET"] ?? defaultSocket
+    let config = ConfigFile.load(from: configPath)
     let server = NavigatorServer(
         socketPath: socketPath,
         log: DecisionLog(directory: defaultLogDir),
-        config: .default,
+        config: config,
+        speaker: SystemSpeaker(),
         startingAt: Date())
 
     do {
@@ -56,6 +95,10 @@ case "run":
     print("navigator listening on \(socketPath)")
     print("logging to \(defaultLogDir.path)")
     print("wire gate CLOSED — no decisions are returned to Claude Code")
+    // Print the live numbers, not the compiled-in ones: the whole point of the
+    // config file is that these change, and a banner showing defaults while the
+    // daemon runs on something else is worse than no banner.
+    print(ConfigFile.describe(config))
 
     // DispatchSourceSignal rather than signal(): its handler runs on a normal
     // queue, where stopping the server and draining the log queue are safe.
@@ -183,6 +226,27 @@ case "status":
         // Not an error: "no daemon" is a supported state, and hooks degrade to
         // silence when it is true.
         print("no daemon on \(socketPath) — sessions run unaffected")
+    }
+
+case "repeat":   sendControl(.repeatLast)
+case "catch-up": sendControl(.catchUp)
+case "sessions": sendControl(.status)
+case "mute":     sendControl(.mute)
+case "unmute":   sendControl(.unmute)
+case "say":      sendControl(.say, argument: arguments.dropFirst(2).joined(separator: " "))
+
+case "config":
+    let config = ConfigFile.load(from: configPath)
+    let exists = FileManager.default.fileExists(atPath: configPath.path)
+    print("config: \(configPath.path)\(exists ? "" : "  (absent — using defaults)")")
+    print(ConfigFile.describe(config))
+
+    if arguments.contains("--write") {
+        try ConfigFile.write(config, to: configPath)
+        print("\nwrote \(configPath.path)")
+        print("edit it, then restart the daemon for the change to take effect")
+    } else if !exists {
+        print("\nrun with --write to create it, then edit the numbers")
     }
 
 default:

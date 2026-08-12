@@ -152,6 +152,30 @@ import Testing
         #expect(third.tier != .speak)
     }
 
+    @Test func spokenSentenceIsGrammatical() {
+        // The entire product is read aloud. An earlier version produced
+        // "wants to force push rewrites remote history", because the rule
+        // reasons were descriptions rather than verb phrases. Nothing caught it
+        // because every test built its own reason string.
+        var subject = engine()
+        let decision = subject.decide(
+            StampedEvent(event: bash("git push --force origin main"), at: t0))
+
+        #expect(decision.utterance == "p wants to force push, which rewrites remote history. Approve?")
+    }
+
+    @Test func offRouteSentenceReadsAsOneClause() {
+        var subject = engine()
+        let write = HookEvent(
+            kind: .preToolUse, sessionID: "s1", cwd: "/p",
+            toolName: "Write", toolInput: ["file_path": .string("/etc/hosts")])
+        let decision = subject.decide(StampedEvent(event: write, at: t0))
+
+        // Reversible but off-route, so an earcon with no words. The reason still
+        // has to read as a phrase for catch-up, which reads it back.
+        #expect(decision.reason == "write to /etc/hosts, outside /p")
+    }
+
     @Test func everyDecisionIsLogged() {
         var subject = engine()
         let before = subject.log.count

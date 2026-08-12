@@ -12,12 +12,13 @@ import Testing
     }
 
     private func makeServer(
-        _ path: String, speaker: RecordingSpeaker
+        _ path: String, speaker: RecordingSpeaker, microphoneBusy: Bool = false
     ) throws -> NavigatorServer {
         var config = PolicyConfig.default
         config.speechInterval = 1  // do not let the budget mask wiring bugs
         let server = NavigatorServer(
             socketPath: path, log: nil, config: config, speaker: speaker,
+            microphoneIsBusy: { microphoneBusy },
             startingAt: Date(timeIntervalSince1970: 1_770_000_000))
         try server.start()
         return server
@@ -172,6 +173,47 @@ import Testing
         settle(speaker) { !speaker.spoken.isEmpty }
 
         #expect(speaker.spoken == ["audio check"])
+    }
+
+    @Test func staysQuietWhileTheMicrophoneIsBusy() throws {
+        let path = tempPath(), speaker = RecordingSpeaker()
+        let server = try makeServer(path, speaker: speaker, microphoneBusy: true)
+        defer { server.stop() }
+
+        _ = try send(path, bash("git push --force", at: Date(timeIntervalSince1970: 1_770_000_000)))
+        server.stop()  // drains the audio queue
+
+        #expect(speaker.spoken.isEmpty, "talked over a call")
+        #expect(speaker.played.isEmpty)
+    }
+
+    @Test func whatHappenedDuringACallIsStillInCatchUp() throws {
+        // Being on a call is exactly when you most need to be told afterwards.
+        let path = tempPath(), speaker = RecordingSpeaker()
+        let server = try makeServer(path, speaker: speaker, microphoneBusy: true)
+        defer { server.stop() }
+
+        let t0 = Date(timeIntervalSince1970: 1_770_000_000)
+        _ = try send(path, bash("git push --force", at: t0))
+        Thread.sleep(forTimeInterval: 0.2)
+
+        let response = try send(path, .control(.catchUp, at: t0.addingTimeInterval(5)))
+        #expect(response.message?.contains("force push") == true)
+    }
+
+    @Test func repeatSaysNothingIfEverythingWasMissed() throws {
+        // Repeat replays what you heard. During a call you heard nothing, so it
+        // must not invent a memory — catch-up is the right tool for that.
+        let path = tempPath(), speaker = RecordingSpeaker()
+        let server = try makeServer(path, speaker: speaker, microphoneBusy: true)
+        defer { server.stop() }
+
+        let t0 = Date(timeIntervalSince1970: 1_770_000_000)
+        _ = try send(path, bash("git push --force", at: t0))
+        Thread.sleep(forTimeInterval: 0.2)
+
+        let response = try send(path, .control(.repeatLast, at: t0.addingTimeInterval(5)))
+        #expect(response.message == "Nothing has been said yet.")
     }
 
     @Test func commandsNeverReturnOutputToClaudeCode() throws {

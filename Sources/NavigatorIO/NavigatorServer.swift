@@ -16,6 +16,11 @@ public final class NavigatorServer: @unchecked Sendable {
     private let config: PolicyConfig
     private let speaker: any Speaker
     private let announcer: Announcer
+    /// Used when the microphone is busy: the decision still reaches the
+    /// transcript, so catch-up can tell you what happened during a call.
+    private let silentAnnouncer = Announcer(speaker: SilentSpeaker())
+    /// Injectable so the busy-microphone path can be tested without a call.
+    private let microphoneIsBusy: @Sendable () -> Bool
 
     private let lock = NSLock()
     private var engine: PolicyEngine
@@ -37,6 +42,8 @@ public final class NavigatorServer: @unchecked Sendable {
         socketPath: String, log: DecisionLog?,
         config: PolicyConfig = .default,
         speaker: any Speaker = SilentSpeaker(),
+        microphoneIsBusy: @escaping @Sendable () -> Bool
+            = InputDeviceMonitor.shouldSuppressAudio,
         startingAt: Date
     ) {
         self.socketPath = socketPath
@@ -44,6 +51,7 @@ public final class NavigatorServer: @unchecked Sendable {
         self.config = config
         self.speaker = speaker
         self.announcer = Announcer(speaker: speaker)
+        self.microphoneIsBusy = microphoneIsBusy
         self.engine = PolicyEngine(config: config, startingAt: startingAt)
     }
 
@@ -141,9 +149,23 @@ public final class NavigatorServer: @unchecked Sendable {
         reply(on: connection, NavigatorResponse(output: output ?? nil))
 
         audio.async { [self] in
-            guard let utterance = announcer.announce(
+            // Checked per utterance rather than once at startup: whether you are
+            // on a call changes minute to minute, which is the whole point.
+            let onACall = microphoneIsBusy()
+            let active = onACall ? silentAnnouncer : announcer
+
+            guard let utterance = active.announce(
                 decision, sessionName: sessionName, at: stamped.at) else { return }
-            lock.lock(); _transcript.record(utterance); lock.unlock()
+
+            // Still recorded, but marked unheard — so catch-up can tell you what
+            // happened while you were talking to someone.
+            let recorded = onACall
+                ? Utterance(
+                    at: utterance.at, sessionName: utterance.sessionName,
+                    text: utterance.text, tier: utterance.tier, wasSpoken: false)
+                : utterance
+
+            lock.lock(); _transcript.record(recorded); lock.unlock()
         }
 
         if let log, let record {
