@@ -273,3 +273,109 @@ extension PolicyEngine {
         #expect(subject.decide(force(10)).tier == .decisionPoint)
     }
 }
+
+@Suite struct LongRunningDaemon {
+    let t0 = Date(timeIntervalSince1970: 1_770_000_000)
+
+    private func engine(_ config: PolicyConfig = .default) -> PolicyEngine {
+        PolicyEngine(config: config, startingAt: t0)
+    }
+
+    private func call(_ session: String, _ at: TimeInterval) -> StampedEvent {
+        StampedEvent(
+            event: HookEvent(
+                kind: .preToolUse, sessionID: session, cwd: "/p",
+                toolName: "Bash", toolInput: ["command": .string("swift build")]),
+            at: t0.addingTimeInterval(at))
+    }
+
+    @Test func theInMemoryLogIsBounded() {
+        // The daemon reads only the most recent record, but ran for weeks
+        // appending every decision it ever made to an array nobody trimmed.
+        var subject = engine(PolicyConfig(recentLogCapacity: 50))
+        for i in 0..<500 { _ = subject.decide(call("s", Double(i))) }
+
+        #expect(subject.log.count == 50)
+        #expect(subject.log.last?.at == t0.addingTimeInterval(499))
+    }
+
+    @Test func theMostRecentRecordIsStillCorrect() {
+        // The daemon's only reader is `log.last`; trimming must not disturb it.
+        var subject = engine(PolicyConfig(recentLogCapacity: 3))
+        for i in 0..<10 { _ = subject.decide(call("s", Double(i))) }
+        #expect(subject.log.last?.at == t0.addingTimeInterval(9))
+    }
+
+    @Test func endedSessionsAreForgotten() {
+        // One entry per session, kept forever. A machine that opens a few
+        // Claude Code windows a day accumulates them indefinitely.
+        var subject = engine()
+        for i in 0..<200 {
+            let id = "session-\(i)"
+            _ = subject.decide(StampedEvent(
+                event: HookEvent(kind: .sessionStart, sessionID: id, cwd: "/p"),
+                at: t0.addingTimeInterval(Double(i))))
+            _ = subject.decide(StampedEvent(
+                event: HookEvent(kind: .sessionEnd, sessionID: id, cwd: "/p"),
+                at: t0.addingTimeInterval(Double(i) + 0.5)))
+        }
+
+        #expect(subject.registry.activeSessions.isEmpty)
+        #expect(subject.registry.trackedCount < 200,
+                "ended sessions were retained: \(subject.registry.trackedCount)")
+    }
+
+    @Test func aLiveSessionIsNeverForgotten() {
+        var subject = engine()
+        _ = subject.decide(StampedEvent(
+            event: HookEvent(kind: .sessionStart, sessionID: "keep", cwd: "/p"), at: t0))
+
+        for i in 0..<200 {
+            let id = "other-\(i)"
+            _ = subject.decide(StampedEvent(
+                event: HookEvent(kind: .sessionStart, sessionID: id, cwd: "/p"),
+                at: t0.addingTimeInterval(Double(i))))
+            _ = subject.decide(StampedEvent(
+                event: HookEvent(kind: .sessionEnd, sessionID: id, cwd: "/p"),
+                at: t0.addingTimeInterval(Double(i) + 0.5)))
+        }
+
+        #expect(subject.registry.session(id: "keep") != nil)
+        #expect(subject.registry.activeSessions.count == 1)
+    }
+}
+
+extension LongRunningDaemon {
+    @Test func aWeekOfWorkDoesNotAccumulate() {
+        // 500 sessions x 40 tool calls — roughly a heavy week. Every per-session
+        // structure has to come back down, not just the obvious one.
+        var subject = engine()
+
+        for s in 0..<500 {
+            let id = "s\(s)"
+            let base = Double(s) * 100
+
+            _ = subject.decide(StampedEvent(
+                event: HookEvent(kind: .sessionStart, sessionID: id, cwd: "/p"),
+                at: t0.addingTimeInterval(base)))
+
+            for i in 0..<40 {
+                _ = subject.decide(call(id, base + Double(i)))
+                _ = subject.decide(StampedEvent(
+                    event: HookEvent(
+                        kind: .postToolUseFailure, sessionID: id, cwd: "/p",
+                        error: "boom"),
+                    at: t0.addingTimeInterval(base + Double(i) + 0.5)))
+            }
+
+            _ = subject.decide(StampedEvent(
+                event: HookEvent(kind: .sessionEnd, sessionID: id, cwd: "/p"),
+                at: t0.addingTimeInterval(base + 60)))
+        }
+
+        #expect(subject.log.count <= PolicyConfig.default.recentLogCapacity)
+        #expect(subject.registry.trackedCount <= 60,
+                "sessions accumulated: \(subject.registry.trackedCount)")
+        #expect(subject.registry.activeSessions.isEmpty)
+    }
+}

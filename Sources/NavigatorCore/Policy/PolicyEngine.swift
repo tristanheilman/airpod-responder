@@ -15,6 +15,7 @@ public struct PolicyEngine: Sendable {
     /// When the live question was asked. Nil means none is outstanding.
     private var questionAskedAt: Date?
     private let questionDeadline: TimeInterval
+    private let recentLogCapacity: Int
 
     public init(
         config: PolicyConfig = .default,
@@ -23,6 +24,7 @@ public struct PolicyEngine: Sendable {
     ) {
         self.reversibilityClassifier = ReversibilityClassifier(userRules: userRules)
         self.questionDeadline = config.questionDeadline
+        self.recentLogCapacity = max(1, config.recentLogCapacity)
         self.budget = SpeechBudget(
             capacity: config.speechCapacity,
             interval: config.speechInterval,
@@ -42,6 +44,14 @@ public struct PolicyEngine: Sendable {
         registry.apply(stamped)
         let event = stamped.event
         let session = registry.session(id: event.sessionID)!
+
+        // Per-session bookkeeping outlives the session unless it is told not to.
+        // Each of these is one small entry, which is exactly why nobody notices
+        // them accumulating for the life of the daemon.
+        if event.kind == .sessionEnd {
+            coalescer.forget(sessionID: event.sessionID)
+            thrash.forget(sessionID: event.sessionID)
+        }
 
         // A write is progress, so it clears any thrash streak.
         if event.kind == .preToolUse, event.filePath != nil {
@@ -86,6 +96,13 @@ public struct PolicyEngine: Sendable {
             suppressedBecause: suppression,
             permission: decision.permission,
             reason: decision.reason))
+
+        // Only the newest record is ever read from here, and the durable copy is
+        // on disk. Keeping the rest is a leak in a process that now runs for
+        // weeks rather than the seconds it used to live in tests.
+        if log.count > recentLogCapacity {
+            log.removeFirst(log.count - recentLogCapacity)
+        }
 
         return decision
     }

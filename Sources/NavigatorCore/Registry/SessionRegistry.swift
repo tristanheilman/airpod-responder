@@ -3,7 +3,20 @@ import Foundation
 public struct SessionRegistry: Sendable {
     private var sessions: [String: Session] = [:]
 
-    public init() {}
+    /// How many ended sessions to keep after they close.
+    ///
+    /// Some history is useful — a `status` moments after a session ends should
+    /// still know what it was. Keeping all of them forever is not: a machine
+    /// that opens a handful of Claude Code windows a day accumulates them for as
+    /// long as the daemon lives.
+    private let endedRetained: Int
+
+    public init(endedRetained: Int = 50) {
+        self.endedRetained = endedRetained
+    }
+
+    /// Total sessions held, live and ended. Exposed for the growth tests.
+    public var trackedCount: Int { sessions.count }
 
     public func session(id: String) -> Session? { sessions[id] }
 
@@ -39,5 +52,19 @@ public struct SessionRegistry: Sendable {
         }
 
         sessions[event.sessionID] = session
+
+        if event.kind == .sessionEnd { forgetOldestEnded() }
+    }
+
+    /// Drops the least recently active ended sessions past the retention limit.
+    private mutating func forgetOldestEnded() {
+        let ended = sessions.values.filter { !$0.isActive }
+        guard ended.count > endedRetained else { return }
+
+        let doomed = ended
+            .sorted { $0.lastEventAt < $1.lastEventAt }
+            .prefix(ended.count - endedRetained)
+
+        for session in doomed { sessions.removeValue(forKey: session.id) }
     }
 }

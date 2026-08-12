@@ -48,7 +48,12 @@ public struct ThrashDetector: Sendable {
 
     /// A file changed, so the next attempt is a genuinely new one.
     public mutating func noteFileChanged(sessionID: String) {
-        streaks[sessionID] = nil
+        streaks.removeValue(forKey: sessionID)
+    }
+
+    /// A session that has ended cannot still be stuck.
+    public mutating func forget(sessionID: String) {
+        streaks.removeValue(forKey: sessionID)
     }
 
     /// Reduces an error message to something stable across attempts.

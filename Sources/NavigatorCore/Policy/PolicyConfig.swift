@@ -17,6 +17,14 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
     public var thrashRepeatThreshold: Int
     public var thrashMinimumDuration: TimeInterval
 
+    /// How many recent decisions the engine keeps in memory.
+    ///
+    /// The daemon only ever reads the most recent one; the durable record is the
+    /// log on disk. This existed unbounded while the process lived for seconds
+    /// at a time in tests, and became a slow leak the moment launchd started
+    /// keeping it alive for weeks.
+    public var recentLogCapacity: Int
+
     /// How long an unanswered question keeps blocking later ones.
     ///
     /// Only one question is ever in flight, but "in flight" has to expire. With
@@ -39,6 +47,7 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
         thrashRepeatThreshold: Int = 3,
         thrashMinimumDuration: TimeInterval = 180,
         questionDeadline: TimeInterval = 20,
+        recentLogCapacity: Int = 500,
         emitDecisions: Bool = false
     ) {
         self.speechCapacity = speechCapacity
@@ -47,6 +56,7 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
         self.thrashRepeatThreshold = thrashRepeatThreshold
         self.thrashMinimumDuration = thrashMinimumDuration
         self.questionDeadline = questionDeadline
+        self.recentLogCapacity = recentLogCapacity
         self.emitDecisions = emitDecisions
     }
 

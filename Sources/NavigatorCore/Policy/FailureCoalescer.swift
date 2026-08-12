@@ -20,4 +20,9 @@ public struct FailureCoalescer: Sendable {
         lastAdmitted[sessionID] = now
         return true
     }
+
+    /// A session that has ended cannot fail again.
+    public mutating func forget(sessionID: String) {
+        lastAdmitted.removeValue(forKey: sessionID)
+    }
 }
