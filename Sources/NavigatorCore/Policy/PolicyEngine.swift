@@ -12,7 +12,9 @@ public struct PolicyEngine: Sendable {
     private var coalescer: FailureCoalescer
     private var thrash: ThrashDetector
     private var muted = false
-    private var questionInFlight = false
+    /// When the live question was asked. Nil means none is outstanding.
+    private var questionAskedAt: Date?
+    private let questionDeadline: TimeInterval
 
     public init(
         config: PolicyConfig = .default,
@@ -20,6 +22,7 @@ public struct PolicyEngine: Sendable {
         startingAt: Date
     ) {
         self.reversibilityClassifier = ReversibilityClassifier(userRules: userRules)
+        self.questionDeadline = config.questionDeadline
         self.budget = SpeechBudget(
             capacity: config.speechCapacity,
             interval: config.speechInterval,
@@ -32,8 +35,8 @@ public struct PolicyEngine: Sendable {
 
     public mutating func setMuted(_ muted: Bool) { self.muted = muted }
 
-    /// Called by the daemon once the live question has been answered or timed out.
-    public mutating func resolveQuestion() { questionInFlight = false }
+    /// Called by the daemon once the live question has been answered.
+    public mutating func resolveQuestion() { questionAskedAt = nil }
 
     public mutating func decide(_ stamped: StampedEvent) -> Decision {
         registry.apply(stamped)
@@ -57,7 +60,7 @@ public struct PolicyEngine: Sendable {
 
         let (delivered, suppression) = deliver(verdict, event: event, at: stamped.at)
 
-        if delivered.isBlocking { questionInFlight = true }
+        if delivered.isBlocking { questionAskedAt = stamped.at }
 
         let decision = Decision(
             tier: delivered,
@@ -97,9 +100,12 @@ public struct PolicyEngine: Sendable {
             return (.silent, "muted — deferred to screen")
         }
 
-        if verdict.tier.isBlocking, questionInFlight {
+        if verdict.tier.isBlocking, let asked = questionAskedAt,
+           now.timeIntervalSince(asked) < questionDeadline {
             // Stalling an agent behind another agent's ten-second exchange is
-            // worse than showing a prompt.
+            // worse than showing a prompt. Bounded by the deadline: an
+            // unanswered question must stop counting, or the first one ever
+            // asked silences every one that follows.
             return (.silent, "another question is already in flight")
         }
 

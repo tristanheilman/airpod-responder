@@ -26,15 +26,40 @@ guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else {
     exit(1)
 }
 
-let events: [StampedEvent]
-do {
-    events = try Replay.parse(jsonl: contents)
-} catch {
-    FileHandle.standardError.write(Data("cannot parse \(path): \(error)\n".utf8))
-    exit(1)
-}
+// Two shapes are accepted: a recorded event stream (fixtures), and the daemon's
+// own decision log. The second is the one that matters — a real day cannot be
+// tuned against if the format it is written in cannot be read back.
+let summary: ReplaySummary
+var records: [DecisionRecord] = []
 
-let (summary, records) = Replay.run(events: events, config: config)
+if let events = try? Replay.parse(jsonl: contents), !events.isEmpty {
+    (summary, records) = Replay.run(events: events, config: config)
+} else {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let logged = contents
+        .split(separator: "\n")
+        .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        .compactMap { try? decoder.decode(DecisionRecord.self, from: Data($0.utf8)) }
+
+    guard !logged.isEmpty else {
+        FileHandle.standardError.write(Data("""
+            cannot read \(path) as either an event stream or a decision log
+
+            expected one JSON object per line, either
+              {"at": "...", "event": {...}}                     (fixture)
+              {"at": "...", "tierAssigned": "...", ...}          (decision log)
+
+            """.utf8))
+        exit(1)
+    }
+
+    records = logged
+    summary = Replay.rerun(records: logged, config: config)
+    FileHandle.standardError.write(
+        Data("replaying \(logged.count) recorded decisions at the given budget\n".utf8))
+}
 
 if arguments.contains("--records") {
     let encoder = JSONEncoder()

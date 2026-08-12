@@ -17,6 +17,14 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
     public var thrashRepeatThreshold: Int
     public var thrashMinimumDuration: TimeInterval
 
+    /// How long an unanswered question keeps blocking later ones.
+    ///
+    /// Only one question is ever in flight, but "in flight" has to expire. With
+    /// no answer channel yet nothing ever resolves one, so without a deadline
+    /// the very first decision point latches the gate and silently swallows
+    /// every one after it — which is exactly what a real log showed.
+    public var questionDeadline: TimeInterval
+
     /// Whether decisions may reach Claude Code at all.
     ///
     /// Off for the observer build. The engine still computes and logs the real
@@ -30,6 +38,7 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
         failureWindow: TimeInterval = 60,
         thrashRepeatThreshold: Int = 3,
         thrashMinimumDuration: TimeInterval = 180,
+        questionDeadline: TimeInterval = 20,
         emitDecisions: Bool = false
     ) {
         self.speechCapacity = speechCapacity
@@ -37,6 +46,7 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
         self.failureWindow = failureWindow
         self.thrashRepeatThreshold = thrashRepeatThreshold
         self.thrashMinimumDuration = thrashMinimumDuration
+        self.questionDeadline = questionDeadline
         self.emitDecisions = emitDecisions
     }
 

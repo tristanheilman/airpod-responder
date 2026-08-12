@@ -216,3 +216,60 @@ extension PolicyEngine {
         _ = decide(StampedEvent(event: event, at: date))
     }
 }
+
+@Suite struct QuestionDeadline {
+    let t0 = Date(timeIntervalSince1970: 1_770_000_000)
+
+    private func engine() -> PolicyEngine {
+        var engine = PolicyEngine(startingAt: t0)
+        _ = engine.decide(StampedEvent(
+            event: HookEvent(kind: .sessionStart, sessionID: "s1", cwd: "/p"), at: t0))
+        return engine
+    }
+
+    private func force(_ at: TimeInterval) -> StampedEvent {
+        StampedEvent(
+            event: HookEvent(
+                kind: .preToolUse, sessionID: "s1", cwd: "/p", toolName: "Bash",
+                toolInput: ["command": .string("git push --force")]),
+            at: t0.addingTimeInterval(at))
+    }
+
+    @Test func anUnansweredQuestionStopsBlockingAfterTheDeadline() {
+        // Found in a real log: nothing calls resolveQuestion in the observer
+        // build, so the in-flight flag latched on the first decision point and
+        // silently swallowed every one after it — half the announcements that
+        // matter most, for the lifetime of the daemon.
+        var subject = engine()
+
+        let first = subject.decide(force(0))
+        #expect(first.tier == .decisionPoint)
+
+        // Still in flight a moment later.
+        let during = subject.decide(force(5))
+        #expect(during.tier == .silent)
+        #expect(during.reason.contains("another question"))
+
+        // Past the deadline it is not, whether or not anyone answered.
+        let after = subject.decide(force(60))
+        #expect(after.tier == .decisionPoint, "the flag latched: \(after.reason)")
+    }
+
+    @Test func answeringClearsItImmediately() {
+        var subject = engine()
+        _ = subject.decide(force(0))
+        subject.resolveQuestion()
+        #expect(subject.decide(force(1)).tier == .decisionPoint)
+    }
+
+    @Test func theDeadlineIsConfigurable() {
+        var subject = PolicyEngine(
+            config: PolicyConfig(questionDeadline: 5), startingAt: t0)
+        _ = subject.decide(StampedEvent(
+            event: HookEvent(kind: .sessionStart, sessionID: "s1", cwd: "/p"), at: t0))
+
+        _ = subject.decide(force(0))
+        #expect(subject.decide(force(3)).tier == .silent)
+        #expect(subject.decide(force(10)).tier == .decisionPoint)
+    }
+}
