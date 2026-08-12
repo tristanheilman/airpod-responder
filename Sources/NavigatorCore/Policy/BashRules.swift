@@ -68,6 +68,10 @@ public enum BashRules {
         BashRule("docker", "prune", reason: "delete unused resources"),
         BashRule("aws", reason: "act on cloud infrastructure"),
         BashRule("gcloud", reason: "act on cloud infrastructure"),
+        // Not because sudo itself destroys anything, but because whatever
+        // follows it runs as root — which is worth hearing about regardless of
+        // whether the rest of the table recognises the command.
+        BashRule("sudo", reason: "run something as root"),
     ]
 
     /// Case-insensitive substrings checked against the whole segment. These
@@ -102,11 +106,49 @@ public enum BashRules {
         BashRule("git", "fetch", reason: ""), BashRule("git", "pull", reason: ""),
         BashRule("git", "push", reason: ""), BashRule("git", "worktree", reason: ""),
         BashRule("git", "init", reason: ""), BashRule("git", "remote", reason: ""),
+        // Read-only plumbing, almost always inside a $( ) substitution.
+        BashRule("git", "rev-parse", reason: ""), BashRule("git", "describe", reason: ""),
+        BashRule("git", "ls-files", reason: ""), BashRule("git", "blame", reason: ""),
+        BashRule("git", "shortlog", reason: ""), BashRule("git", "merge-base", reason: ""),
+        BashRule("git", "symbolic-ref", reason: ""), BashRule("git", "cat-file", reason: ""),
+        BashRule("git", "rev-list", reason: ""), BashRule("git", "name-rev", reason: ""),
         BashRule("swift", reason: ""), BashRule("cargo", reason: ""),
         BashRule("make", reason: ""), BashRule("pytest", reason: ""),
         BashRule("go", reason: ""), BashRule("npm", "test", reason: ""),
         BashRule("npm", "run", reason: ""), BashRule("pnpm", "test", reason: ""),
         BashRule("pnpm", "run", reason: ""), BashRule("npx", reason: ""),
         BashRule("xcodebuild", reason: ""), BashRule("open", reason: ""),
+        // Added from the decision log: every one of these was showing up as an
+        // unrecognised command during ordinary work.
+        BashRule("gh", reason: ""), BashRule("printf", reason: ""),
+        BashRule("basename", reason: ""), BashRule("dirname", reason: ""),
+        BashRule("uname", reason: ""), BashRule("date", reason: ""),
+        BashRule("shasum", reason: ""), BashRule("stat", reason: ""),
+        BashRule("realpath", reason: ""), BashRule("readlink", reason: ""),
+        BashRule("env", reason: ""), BashRule("seq", reason: ""),
+        BashRule("tr", reason: ""), BashRule("cut", reason: ""),
+        BashRule("du", reason: ""), BashRule("df", reason: ""),
+        BashRule("ps", reason: ""), BashRule("file", reason: ""),
+        BashRule("test", reason: ""), BashRule("[", reason: ""),
+        BashRule("tee", reason: ""), BashRule("column", reason: ""),
+        BashRule("sw_vers", reason: ""), BashRule("swiftc", reason: ""),
+        BashRule("read", reason: ""), BashRule("sleep", reason: ""),
+        BashRule("wait", reason: ""), BashRule("cd", reason: ""),
+        BashRule("export", reason: ""), BashRule("set", reason: ""),
+        BashRule("unset", reason: ""), BashRule("exit", reason: ""),
+        BashRule("type", reason: ""), BashRule("false", reason: ""),
+        // Ends a process; nothing is destroyed and you restart it. Reversible in
+        // the sense that matters here — you can quietly undo it on this machine.
+        BashRule("kill", reason: ""),
+        //
+        // Deliberately still absent, and the unknown rate is not a reason to add
+        // them: `python3`, `node`, `ruby`, `perl`, `eval`, `xargs`, and any
+        // binary named by path all run code this table never saw. Listing them
+        // as safe would be vouching for something unexamined, which is the one
+        // thing the classifier must not do. Unknown defers, and deferring is
+        // correct here.
+        BashRule("wc", reason: ""), BashRule("tail", reason: ""),
+        // Deliberately absent: xargs and eval run arbitrary other commands, so
+        // recognising them would vouch for something we never inspected.
     ]
 }
