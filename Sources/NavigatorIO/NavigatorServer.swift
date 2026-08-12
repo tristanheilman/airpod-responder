@@ -41,6 +41,7 @@ public final class NavigatorServer: @unchecked Sendable {
     public init(
         socketPath: String, log: DecisionLog?,
         config: PolicyConfig = .default,
+        userRules: UserRules = UserRules(),
         speaker: any Speaker = SilentSpeaker(),
         microphoneIsBusy: @escaping @Sendable () -> Bool
             = InputDeviceMonitor.shouldSuppressAudio,
@@ -52,7 +53,8 @@ public final class NavigatorServer: @unchecked Sendable {
         self.speaker = speaker
         self.announcer = Announcer(speaker: speaker)
         self.microphoneIsBusy = microphoneIsBusy
-        self.engine = PolicyEngine(config: config, startingAt: startingAt)
+        self.engine = PolicyEngine(
+            config: config, userRules: userRules, startingAt: startingAt)
     }
 
     public var decisionCount: Int {

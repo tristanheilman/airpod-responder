@@ -4,7 +4,7 @@ public struct PolicyEngine: Sendable {
     public private(set) var registry = SessionRegistry()
     public private(set) var log: [DecisionRecord] = []
 
-    private let reversibilityClassifier = ReversibilityClassifier()
+    private let reversibilityClassifier: ReversibilityClassifier
     private let routeClassifier = RouteClassifier()
     private let tierAssigner = TierAssigner()
 
@@ -14,7 +14,12 @@ public struct PolicyEngine: Sendable {
     private var muted = false
     private var questionInFlight = false
 
-    public init(config: PolicyConfig = .default, startingAt: Date) {
+    public init(
+        config: PolicyConfig = .default,
+        userRules: UserRules = UserRules(),
+        startingAt: Date
+    ) {
+        self.reversibilityClassifier = ReversibilityClassifier(userRules: userRules)
         self.budget = SpeechBudget(
             capacity: config.speechCapacity,
             interval: config.speechInterval,

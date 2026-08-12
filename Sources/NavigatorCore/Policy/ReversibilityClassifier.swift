@@ -11,14 +11,26 @@ public struct ReversibilityClassifier: Sendable {
         "Edit", "Write", "NotebookEdit", "WebSearch",
     ]
 
+    /// Precedence, and the asymmetry in it, matters:
+    ///
+    /// 1. user irreversible — you can always ask to hear about more
+    /// 2. built-in irreversible
+    /// 3. user safe
+    /// 4. built-in safe
+    ///
+    /// A user safe rule deliberately cannot un-flag a built-in danger. Adding to
+    /// the safe list is routine housekeeping done from a log of unknowns;
+    /// letting that silently disarm `rm` or a force push would turn a
+    /// convenience into the one thing this must never do.
     public init(
         irreversibleCommands: [BashRule] = BashRules.irreversibleCommands,
         irreversibleContent: [(pattern: String, reason: String)] = BashRules.irreversibleContent,
-        safeCommands: [BashRule] = BashRules.safeCommands
+        safeCommands: [BashRule] = BashRules.safeCommands,
+        userRules: UserRules = UserRules()
     ) {
-        self.irreversibleCommands = irreversibleCommands
+        self.irreversibleCommands = userRules.irreversible + irreversibleCommands
         self.irreversibleContent = irreversibleContent
-        self.safeCommands = safeCommands
+        self.safeCommands = userRules.safe + safeCommands
     }
 
     public func classify(toolName: String?, toolInput: [String: JSONValue]?) -> Reversibility {
@@ -180,7 +192,97 @@ public struct ReversibilityClassifier: Sendable {
     ///
     /// Under-splitting is still safe, because a segment whose program is not
     /// recognised reports `.unknown`, which defers. It never reports reversible.
+    /// Shells whose heredoc body really is executed, so it must still be read.
+    private static let shellInterpreters: Set<String> = ["bash", "sh", "zsh", "dash", "ksh"]
+
+    /// Removes heredoc bodies, which are data rather than commands.
+    ///
+    /// `cat <<'EOF' … EOF` was reporting `EOF` as an unrecognised program, and
+    /// would have classified the prose of a commit message as though someone had
+    /// typed it at a prompt.
+    ///
+    /// The exception matters: `bash <<EOF` genuinely executes its body, so that
+    /// one is left alone. Stripping it would hide whatever is inside, and hiding
+    /// is the one direction that is not safe.
+    static func removingHeredocBodies(_ command: String) -> String {
+        let lines = command.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        var kept: [String] = []
+        var index = 0
+
+        while index < lines.count {
+            let line = lines[index]
+            kept.append(line)
+            index += 1
+
+            guard let delimiter = heredocDelimiter(in: line) else { continue }
+
+            let firstWord = effectiveTokens(tokenize(line)).first ?? ""
+            if shellInterpreters.contains(firstWord) { continue }
+
+            while index < lines.count,
+                  lines[index].trimmingCharacters(in: .whitespaces) != delimiter {
+                index += 1
+            }
+            // Step past the terminator itself; anything after it is real again.
+            if index < lines.count { index += 1 }
+        }
+
+        return kept.joined(separator: "\n")
+    }
+
+    /// Finds a heredoc delimiter, ignoring `<<` that appears inside quotes.
+    ///
+    /// Without the quote check, `echo "a << b"` would swallow every following
+    /// line — silently dropping real commands from classification.
+    static func heredocDelimiter(in line: String) -> String? {
+        let characters = Array(line)
+        var quote: Character?
+        var index = 0
+
+        while index < characters.count {
+            let character = characters[index]
+
+            if let open = quote {
+                if character == open { quote = nil }
+                index += 1
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+                index += 1
+                continue
+            }
+            guard character == "<", index + 1 < characters.count,
+                  characters[index + 1] == "<"
+            else {
+                index += 1
+                continue
+            }
+
+            var scan = index + 2
+            // `<<<` is a here-string: one line of data, no terminator to find.
+            if scan < characters.count, characters[scan] == "<" { return nil }
+            if scan < characters.count, characters[scan] == "-" { scan += 1 }
+            while scan < characters.count, characters[scan] == " " { scan += 1 }
+            if scan < characters.count,
+               characters[scan] == "'" || characters[scan] == "\"" { scan += 1 }
+
+            var word = ""
+            while scan < characters.count,
+                  characters[scan].isLetter || characters[scan].isNumber
+                    || characters[scan] == "_" {
+                word.append(characters[scan])
+                scan += 1
+            }
+            return word.isEmpty ? nil : word
+        }
+
+        return nil
+    }
+
     static func segments(of command: String) -> [String] {
+        let command = removingHeredocBodies(command)
         var segments: [String] = []
         var current = ""
         var quote: Character?

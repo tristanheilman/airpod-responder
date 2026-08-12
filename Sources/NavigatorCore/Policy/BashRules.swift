@@ -139,7 +139,7 @@ public enum BashRules {
         BashRule("type", reason: ""), BashRule("false", reason: ""),
         // Ends a process; nothing is destroyed and you restart it. Reversible in
         // the sense that matters here — you can quietly undo it on this machine.
-        BashRule("kill", reason: ""),
+        BashRule("kill", reason: ""), BashRule("lsof", reason: ""),
         //
         // Deliberately still absent, and the unknown rate is not a reason to add
         // them: `python3`, `node`, `ruby`, `perl`, `eval`, `xargs`, and any

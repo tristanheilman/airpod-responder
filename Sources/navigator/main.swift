@@ -37,6 +37,8 @@ func usage() -> Never {
               [--prefix P]  where to copy them (default ~/.claude/bin)
       uninstall [--apply]   remove this tool's hooks from settings.json
       config [--write]      show the live settings; --write creates the file
+      learn [days]          commands the classifier did not recognise
+      learn --safe a,b      mark them safe in rules.json
 
     install and uninstall print what they would do and change nothing without
     --apply. install backs settings.json up first.
@@ -103,10 +105,26 @@ case "run":
 
     let socketPath = ProcessInfo.processInfo.environment["NAVIGATOR_SOCKET"] ?? defaultSocket
     let config = ConfigFile.load(from: configPath)
+
+    // Loaded once at startup, so `navigator learn` tells you to restart. A file
+    // watcher would be nicer but the classifier is meant to be predictable, and
+    // rules changing mid-session is the opposite of that.
+    let rulesURL = defaultLogDir.appendingPathComponent("rules.json")
+    var userRules = UserRules()
+    if let text = try? String(contentsOf: rulesURL, encoding: .utf8) {
+        do {
+            userRules = try UserRules.decode(text)
+        } catch {
+            FileHandle.standardError.write(
+                Data("navigator: ignoring malformed \(rulesURL.path): \(error)\n".utf8))
+        }
+    }
+
     let server = NavigatorServer(
         socketPath: socketPath,
         log: DecisionLog(directory: defaultLogDir),
         config: config,
+        userRules: userRules,
         speaker: SystemSpeaker(),
         startingAt: Date())
 
@@ -124,6 +142,9 @@ case "run":
     // config file is that these change, and a banner showing defaults while the
     // daemon runs on something else is worse than no banner.
     print(ConfigFile.describe(config))
+    if !userRules.isEmpty {
+        print("user rules       \(userRules.safe.count) safe, \(userRules.irreversible.count) flagged")
+    }
 
     // DispatchSourceSignal rather than signal(): its handler runs on a normal
     // queue, where stopping the server and draining the log queue are safe.
@@ -348,6 +369,78 @@ case "service":
             Data("usage: navigator service install|uninstall|restart|status\n".utf8))
         exit(2)
     }
+
+case "learn":
+    let rulesURL = defaultLogDir.appendingPathComponent("rules.json")
+
+    // Adding entries is the common case, so handle it before reporting.
+    let additions = arguments.dropFirst(2)
+        .filter { !$0.hasPrefix("--") }
+        .flatMap { $0.split(separator: ",").map(String.init) }
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+
+    if arguments.contains("--safe"), !additions.isEmpty {
+        var rules = UserRules()
+        if let existing = try? String(contentsOf: rulesURL, encoding: .utf8) {
+            do {
+                rules = try UserRules.decode(existing)
+            } catch {
+                // Refusing rather than overwriting: the file is hand-edited, and
+                // silently replacing a typo'd one loses everything in it.
+                FileHandle.standardError.write(Data("""
+                    \(rulesURL.path) is not valid JSON: \(error)
+                    fix or delete it before adding rules
+                    """.utf8))
+                exit(1)
+            }
+        }
+
+        for command in additions { rules.addSafe(command) }
+        try FileManager.default.createDirectory(
+            at: defaultLogDir, withIntermediateDirectories: true)
+        try rules.encoded().write(to: rulesURL, atomically: true, encoding: .utf8)
+
+        print("Marked safe: \(additions.joined(separator: ", "))")
+        print("Wrote \(rulesURL.path)")
+        print("Restart to apply: navigator service restart")
+        exit(0)
+    }
+
+    // Otherwise, report what the log has seen.
+    let days = Int(arguments.first { Int($0) != nil } ?? "7") ?? 7
+    let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+
+    let logs = (try? FileManager.default.contentsOfDirectory(
+        at: defaultLogDir, includingPropertiesForKeys: nil)) ?? []
+    let records = logs
+        .filter { $0.lastPathComponent.hasPrefix("decisions-") }
+        .flatMap { (try? DecisionLog.replayable(from: $0)) ?? [] }
+
+    let unknowns = LearnReport.unknownCommands(in: records, since: cutoff)
+
+    guard !unknowns.isEmpty else {
+        print("No unrecognised commands in the last \(days) days.")
+        if records.isEmpty { print("(no decision log yet — is the daemon running?)") }
+        exit(0)
+    }
+
+    print("Unrecognised commands, last \(days) days:\n")
+    for unknown in unknowns.prefix(20) {
+        print(String(format: "  %4d×  %@", unknown.count, unknown.command))
+    }
+
+    let names = unknowns.prefix(5).map(\.command).joined(separator: ",")
+    print("""
+
+        These currently defer to the on-screen prompt. Mark the safe ones:
+
+          navigator learn --safe \(names)
+
+        Rules live in \(rulesURL.path) and can be edited by hand.
+        Commands named by path are omitted — a path cannot promise what it
+        will contain next week.
+        """)
 
 case "audio":
     let report = InputDeviceMonitor.report()

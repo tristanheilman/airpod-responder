@@ -177,3 +177,51 @@ extension RealCommandClassification {
         #expect(bash("LOG=/tmp/decisions-$(date -u +%Y-%m-%d).jsonl") == .reversible)
     }
 }
+
+extension RealCommandClassification {
+    // Heredoc bodies are data, not commands. Treating them as commands reported
+    // the terminator — `EOF`, `PY` — as an unrecognised program, and would
+    // classify prose in a commit message as though someone had typed it.
+
+    @Test func heredocBodiesAreNotCommands() {
+        #expect(bash("cat >> file.swift <<'EOF'\nfunc thing() {}\nEOF") == .reversible)
+        #expect(bash("python3 - <<'PY'\nimport json\nPY") == .unknown(
+            reason: "unrecognised command python3"))
+        #expect(bash("cat <<EOF > /tmp/x\nhello\nEOF") == .reversible)
+        #expect(bash("cat <<-EOF\n\tindented\nEOF") == .reversible)
+    }
+
+    @Test func commandsAfterAHeredocStillCount() {
+        // The body ends at the terminator; what follows is real again.
+        guard case .irreversible = bash("cat <<'EOF' > x\nbody\nEOF\nrm -rf build") else {
+            Issue.record("lost the command after the heredoc terminator")
+            return
+        }
+    }
+
+    @Test func aHeredocFeedingAShellIsStillCode() {
+        // `bash <<EOF` really does execute its body. Stripping it would hide
+        // whatever is in there, which is the one direction that is not safe.
+        guard case .irreversible = bash("bash <<'EOF'\nrm -rf /tmp/x\nEOF") else {
+            Issue.record("stripped a body that actually executes")
+            return
+        }
+        guard case .irreversible = bash("sh <<EOF\ngit push --force\nEOF") else {
+            Issue.record("stripped a body that actually executes")
+            return
+        }
+    }
+
+    @Test func quotedAngleBracketsAreNotAHeredoc() {
+        // `echo "a << b"` must not swallow the following lines, which would
+        // silently drop real commands from classification.
+        guard case .irreversible = bash("echo \"a << b\"\nrm -rf build") else {
+            Issue.record("a quoted << swallowed the next line")
+            return
+        }
+    }
+
+    @Test func hereStringsAreNotHeredocs() {
+        #expect(bash("grep pattern <<< \"$VAR\"") == .reversible)
+    }
+}
