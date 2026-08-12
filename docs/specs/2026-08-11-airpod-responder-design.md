@@ -89,9 +89,78 @@ holds unchanged; `defer` is an engine-internal verdict that the wire encoder
 renders as an empty result. `"ask"` has no wire representation at all and is not
 modelled.
 
-`PermissionRequest` is a separate event that fires precisely when a tool call
-needs a permission decision. It is a closer fit for the voice-answer path than
-`PreToolUse` and should be evaluated in the daemon plan.
+### `PreToolUse` vs `PermissionRequest`
+
+`PermissionRequest` is a separate event that fires when a tool call needs a
+permission decision, ordered `PreToolUse → PermissionRequest → PostToolUse`. It
+looks like a better fit for this tool than `PreToolUse`, and for the *answer*
+channel it is. As the backbone it is not.
+
+**What the docs establish:**
+
+| | `PreToolUse` | `PermissionRequest` |
+|---|---|---|
+| Fires | "on every tool call inside the agentic loop" — all modes, regardless of allow rules | only "when a tool call needs a permission decision" |
+| Decision values | `allow`, `deny` | `allow`, `deny`, **`escalate`** |
+| How to defer | emit nothing (implicit) | `escalate` — "presents the permission dialog to the user" (explicit) |
+| Exit code 2 | blocks | not honoured |
+
+`escalate` is genuinely nicer than deferring by silence: it says what it means.
+
+**What the docs do not say** — and these matter:
+
+1. Whether `PermissionRequest` fires in `acceptEdits`, `auto`, `dontAsk`, or
+   `bypassPermissions`.
+2. Whether it fires for allowlisted tools or read-only tools that never prompt.
+3. Whether a `PreToolUse` `allow` suppresses the subsequent `PermissionRequest`.
+
+**Why `PreToolUse` is the backbone anyway.** Two reasons, neither about latency:
+
+*Coverage in the modes that matter.* `auto` mode runs "everything, with
+background safety checks", so almost nothing needs a permission decision and
+`PermissionRequest` would rarely fire. But `auto` is exactly the mode you are in
+when you have AirPods on and agents running long tasks — and the navigator's
+whole value there is announcing the force push that `auto` was about to approve.
+Only `PreToolUse` fires regardless of mode.
+
+*The silence rate is the product's central claim.* "Most tool calls are
+reversible and on-route, so most are silent" is the thesis, and the replay
+harness exists to check it against real days. `PermissionRequest` only ever sees
+contested calls, so it cannot measure what fraction of a day was quiet — the one
+number the design rests on.
+
+There is also a risk asymmetry worth naming. On `PermissionRequest`, every
+`allow` suppresses a prompt you would certainly have seen. On `PreToolUse`, an
+`allow` may be a no-op, because the call was going to be permitted anyway. Per
+call, `PermissionRequest`'s `allow` is the more consequential act.
+
+**Decision.** `PreToolUse` is the backbone. `PermissionRequest` is added later,
+for the voice answer channel only, where `escalate` earns its keep. See
+"Observer first" below for the sequencing that falls out of this.
+
+### Observer first: the hook returns nothing in the first daemon build
+
+The first daemon build wires `PreToolUse` as a **pure observer**. It logs every
+event, speaks according to policy, and **never emits a permission decision at
+all** — stdout is always empty.
+
+This is not timidity, it buys four things:
+
+- **Blast radius is zero by construction, not by invariant.** An empty stdout
+  cannot widen anything. That is a one-line property test over every possible
+  input, strictly stronger than reasoning about which verdicts are safe.
+- **All three undocumented behaviours above stop mattering.** A silent hook has
+  no interaction with them to get wrong.
+- **It produces the data that makes the next step safe.** A day of real traffic
+  shows whether the classifier's reversible-and-on-route calls really were, and
+  answers the three open questions empirically for free.
+- **It matches the stated failure posture.** Every failure path is supposed to
+  land on plain Claude Code. A pure observer *is* plain Claude Code, plus
+  narration.
+
+Auto-allow then arrives as a config flag (default off) once the log justifies
+it, and `PermissionRequest` after that. `PolicyConfig` gains `autoAllow: Bool`
+to gate it; the engine already computes the verdict correctly either way.
 
 Rejected alternatives:
 
