@@ -1,22 +1,35 @@
 import Foundation
 
 public struct Decision: Sendable, Equatable {
+    /// What actually happens — after mute, budget and concurrency have had
+    /// their say.
     public let tier: Tier
+    /// What the classifier asked for, before any of that.
+    ///
+    /// Both are needed downstream: a delivered `.silent` means "routine, ignore
+    /// it" when that is also what was intended, and "you missed this" when it
+    /// was not. Collapsing them makes catch-up unable to report the one thing
+    /// it exists for.
+    public let intendedTier: Tier
     public let permission: PermissionDecision?
     public let utterance: String?
     public let reason: String
     public let blocking: Bool
 
     public init(
-        tier: Tier, permission: PermissionDecision?,
+        tier: Tier, intendedTier: Tier? = nil, permission: PermissionDecision?,
         utterance: String?, reason: String, blocking: Bool
     ) {
         self.tier = tier
+        self.intendedTier = intendedTier ?? tier
         self.permission = permission
         self.utterance = utterance
         self.reason = reason
         self.blocking = blocking
     }
+
+    /// True when something was meant to reach you and did not.
+    public var wasSuppressed: Bool { tier != intendedTier }
 }
 
 /// One line of the decision log.

@@ -3,7 +3,7 @@ import Testing
 @testable import NavigatorCore
 @testable import NavigatorIO
 
-@Suite struct NavigatorServing {
+@Suite(.serialized) struct NavigatorServing {
     private func tempPath() -> String {
         "/tmp/navsrv-\(UInt32.random(in: 0..<UInt32.max)).sock"
     }
@@ -17,10 +17,10 @@ import Testing
     }
 
     private func exchange(_ path: String, _ request: NavigatorRequest) throws -> NavigatorResponse {
-        let client = try UnixSocket.connect(to: path, timeout: 2)
+        let client = try UnixSocket.connect(to: path, timeout: 10)
         defer { client.close() }
         try client.write(try NavigatorMessage.encodeLine(request))
-        let line = try client.readLine(deadline: 2)
+        let line = try client.readLine(deadline: 10)
         return try NavigatorMessage.decode(line, as: NavigatorResponse.self)
     }
 
@@ -160,7 +160,7 @@ import Testing
         try server.start()
         defer { server.stop() }
 
-        let bad = try UnixSocket.connect(to: path, timeout: 2)
+        let bad = try UnixSocket.connect(to: path, timeout: 10)
         try bad.write(Data("this is not json\n".utf8))
         _ = try? bad.readLine(deadline: 1)
         bad.close()

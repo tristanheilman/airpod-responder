@@ -56,8 +56,13 @@ public struct PolicyEngine: Sendable {
 
         let decision = Decision(
             tier: delivered,
+            intendedTier: verdict.tier,
             permission: suppression == nil ? verdict.permission : demote(verdict.permission),
-            utterance: delivered.isSpeech ? utterance(for: verdict, event: event) : nil,
+            // Phrased from the *intended* tier, not the delivered one. A muted
+            // or budget-suppressed decision still needs its words written down,
+            // or catch-up has nothing to read back — only the reason it was
+            // suppressed, which is not the part you missed.
+            utterance: verdict.tier.isSpeech ? utterance(for: verdict, event: event) : nil,
             reason: suppression ?? verdict.reason,
             blocking: delivered.isBlocking)
 

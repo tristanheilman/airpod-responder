@@ -43,9 +43,22 @@ public struct Announcer: Sendable {
                 tier: .silentQueue, wasSpoken: false)
 
         case .silent:
-            // Routine allowed calls. Recording these would flood the ring buffer
-            // and evict everything actually worth recalling.
-            return nil
+            // A delivered `.silent` means two very different things.
+            //
+            // If silence was also what the classifier wanted, this is a routine
+            // allowed call — recording it would flood the ring buffer and evict
+            // everything worth recalling.
+            //
+            // If it wanted to say something and mute, the budget or the
+            // concurrency gate stopped it, this is precisely what catch-up
+            // exists to report. Dropping it would make "what did I miss?"
+            // answer "nothing" for the whole time you were muted.
+            guard decision.wasSuppressed else { return nil }
+
+            return Utterance(
+                at: now, sessionName: sessionName,
+                text: decision.utterance ?? "\(sessionName): \(decision.reason)",
+                tier: decision.intendedTier, wasSpoken: false)
         }
     }
 }

@@ -1,8 +1,9 @@
 import Darwin
 import Foundation
+import NavigatorAudio
 import NavigatorCore
 
-/// Accepts hook connections, decides, replies, then logs.
+/// Accepts hook connections, decides, replies, then speaks and logs.
 ///
 /// Threading is deliberately old-fashioned: a dedicated thread blocks in
 /// `accept`, each connection is handled on a concurrent queue, and the engine
@@ -13,9 +14,13 @@ public final class NavigatorServer: @unchecked Sendable {
     private let socketPath: String
     private let log: DecisionLog?
     private let config: PolicyConfig
+    private let speaker: any Speaker
+    private let announcer: Announcer
 
     private let lock = NSLock()
     private var engine: PolicyEngine
+    private var _transcript = Transcript()
+    private var lastCatchUp: Date?
     private var count = 0
 
     private let stateLock = NSLock()
@@ -25,20 +30,31 @@ public final class NavigatorServer: @unchecked Sendable {
     private let workers = DispatchQueue(
         label: "navigator.connections", attributes: .concurrent)
     private let logging = DispatchQueue(label: "navigator.logging")
+    /// Serial, so utterances queue rather than overlap.
+    private let audio = DispatchQueue(label: "navigator.audio")
 
     public init(
         socketPath: String, log: DecisionLog?,
-        config: PolicyConfig = .default, startingAt: Date
+        config: PolicyConfig = .default,
+        speaker: any Speaker = SilentSpeaker(),
+        startingAt: Date
     ) {
         self.socketPath = socketPath
         self.log = log
         self.config = config
+        self.speaker = speaker
+        self.announcer = Announcer(speaker: speaker)
         self.engine = PolicyEngine(config: config, startingAt: startingAt)
     }
 
     public var decisionCount: Int {
         lock.lock(); defer { lock.unlock() }
         return count
+    }
+
+    public var transcript: Transcript {
+        lock.lock(); defer { lock.unlock() }
+        return _transcript
     }
 
     private var isRunning: Bool {
@@ -76,11 +92,12 @@ public final class NavigatorServer: @unchecked Sendable {
 
         listener?.close()
 
-        // Drain the logging queue before returning. Records are appended
-        // asynchronously so disk never sits on the hook's critical path, which
-        // means a shutdown that does not wait here silently discards whatever
-        // was still in flight — the last few decisions of every session.
+        // Drain both queues before returning. Records and utterances are
+        // dispatched asynchronously so neither disk nor audio sits on the hook's
+        // critical path, which means a shutdown that does not wait here silently
+        // discards whatever was still in flight.
         logging.sync {}
+        audio.sync {}
 
         unlink(socketPath)
     }
@@ -94,25 +111,39 @@ public final class NavigatorServer: @unchecked Sendable {
         else {
             // Reply with silence rather than dropping the connection: the hook
             // is waiting, and a malformed request must not stall a tool call.
-            let empty = (try? NavigatorMessage.encodeLine(NavigatorResponse.empty))
-                ?? Data("{}\n".utf8)
-            try? connection.write(empty)
+            reply(on: connection, NavigatorResponse.empty)
+            return
+        }
+
+        if let command = request.command {
+            let message = handle(command, argument: request.argument, at: request.at)
+            reply(on: connection, NavigatorResponse(output: nil, message: message))
+            return
+        }
+
+        guard let stamped = request.stamped else {
+            reply(on: connection, NavigatorResponse.empty)
             return
         }
 
         lock.lock()
-        let decision = engine.decide(request.stamped)
+        let decision = engine.decide(stamped)
         let record = engine.log.last
+        let sessionName = engine.registry.session(id: stamped.event.sessionID)
+            .map(Transcript.name(of:)) ?? "a session"
         count += 1
         lock.unlock()
 
         let output = try? HookOutput.encode(
-            decision, for: request.event.kind, emitDecisions: config.emitDecisions)
+            decision, for: stamped.event.kind, emitDecisions: config.emitDecisions)
 
-        // Respond first. Disk never sits on the hook's critical path.
-        if let reply = try? NavigatorMessage.encodeLine(
-            NavigatorResponse(output: output ?? nil)) {
-            try? connection.write(reply)
+        // Respond first. Neither disk nor audio sits on the hook's critical path.
+        reply(on: connection, NavigatorResponse(output: output ?? nil))
+
+        audio.async { [self] in
+            guard let utterance = announcer.announce(
+                decision, sessionName: sessionName, at: stamped.at) else { return }
+            lock.lock(); _transcript.record(utterance); lock.unlock()
         }
 
         if let log, let record {
@@ -126,6 +157,67 @@ public final class NavigatorServer: @unchecked Sendable {
                         Data("navigator: cannot write decision log: \(error)\n".utf8))
                 }
             }
+        }
+    }
+
+    private func reply(on connection: UnixSocket, _ response: NavigatorResponse) {
+        let data = (try? NavigatorMessage.encodeLine(response)) ?? Data("{}\n".utf8)
+        try? connection.write(data)
+    }
+
+    // MARK: - Commands
+
+    /// Returns text for the terminal. Speaking is a side effect where it makes
+    /// sense — you may be asking from a keyboard or from across the room.
+    private func handle(
+        _ command: NavigatorCommand, argument: String?, at now: Date
+    ) -> String {
+        switch command {
+        case .repeatLast:
+            lock.lock()
+            let last = _transcript.lastSpoken
+            lock.unlock()
+
+            guard let last else { return "Nothing has been said yet." }
+            audio.async { [self] in speaker.say(last.text) }
+            return last.text
+
+        case .status:
+            lock.lock()
+            let sessions = engine.registry.activeSessions
+            let text = _transcript.statusDigest(sessions: sessions, at: now)
+            lock.unlock()
+
+            audio.async { [self] in speaker.say(text) }
+            return text
+
+        case .catchUp:
+            lock.lock()
+            let text = _transcript.digest(since: lastCatchUp)
+            lastCatchUp = now
+            lock.unlock()
+
+            audio.async { [self] in speaker.say(text) }
+            return text
+
+        case .mute:
+            lock.lock(); engine.setMuted(true); lock.unlock()
+            // Stop synchronously: the point of muting is that the current
+            // sentence stops, not that it finishes first.
+            speaker.stop()
+            speaker.play(.acknowledged)
+            return "Muted."
+
+        case .unmute:
+            lock.lock(); engine.setMuted(false); lock.unlock()
+            speaker.play(.acknowledged)
+            return "Unmuted."
+
+        case .say:
+            let text = argument ?? ""
+            guard !text.isEmpty else { return "Nothing to say." }
+            audio.async { [self] in speaker.say(text) }
+            return text
         }
     }
 }

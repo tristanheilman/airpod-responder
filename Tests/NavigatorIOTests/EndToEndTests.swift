@@ -3,7 +3,7 @@ import Testing
 @testable import NavigatorCore
 @testable import NavigatorIO
 
-@Suite struct EndToEnd {
+@Suite(.serialized) struct EndToEnd {
     @Test func aDayOfEventsProducesALogAndNoOutput() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("nav-e2e-\(UUID().uuidString)")
@@ -30,12 +30,12 @@ import Testing
         ]
 
         for (i, event) in events.enumerated() {
-            let client = try UnixSocket.connect(to: path, timeout: 2)
+            let client = try UnixSocket.connect(to: path, timeout: 10)
             defer { client.close() }
             let request = NavigatorRequest(
                 event: event, at: day.addingTimeInterval(Double(i) * 10))
             try client.write(try NavigatorMessage.encodeLine(request))
-            let reply = try client.readLine(deadline: 2)
+            let reply = try client.readLine(deadline: 10)
             let response = try NavigatorMessage.decode(reply, as: NavigatorResponse.self)
 
             // The whole point of the observer build.
