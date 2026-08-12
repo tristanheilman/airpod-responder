@@ -51,10 +51,20 @@ public struct DecisionRecord: Sendable, Equatable, Codable {
     public let permission: PermissionDecision?
     public let reason: String
 
+    /// The event's discriminating sub-type, where it has one:
+    /// `notification_type` for notifications, `error_type` for failures.
+    ///
+    /// Added because the log could say a notification was ignored but not
+    /// *which* notification — so there was no way to decide whether ignoring it
+    /// was right. Deliberately a type, not the payload: enough to make the
+    /// decision reviewable without writing your commands and messages to disk.
+    public let detail: String?
+
     public init(
         at: Date, sessionID: String, kind: HookEventKind, toolName: String?,
         reversibility: String, route: String, tierAssigned: Tier, delivered: Tier,
-        suppressedBecause: String?, permission: PermissionDecision?, reason: String
+        suppressedBecause: String?, permission: PermissionDecision?, reason: String,
+        detail: String? = nil
     ) {
         self.at = at
         self.sessionID = sessionID
@@ -67,5 +77,6 @@ public struct DecisionRecord: Sendable, Equatable, Codable {
         self.suppressedBecause = suppressedBecause
         self.permission = permission
         self.reason = reason
+        self.detail = detail
     }
 }

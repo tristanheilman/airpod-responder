@@ -95,7 +95,8 @@ public struct PolicyEngine: Sendable {
             delivered: delivered,
             suppressedBecause: suppression,
             permission: decision.permission,
-            reason: decision.reason))
+            reason: decision.reason,
+            detail: event.notificationType ?? event.errorType))
 
         // Only the newest record is ever read from here, and the durable copy is
         // on disk. Keeping the rest is a leak in a process that now runs for

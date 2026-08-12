@@ -379,3 +379,36 @@ extension LongRunningDaemon {
         #expect(subject.registry.activeSessions.isEmpty)
     }
 }
+
+extension PolicyEngineBehavior {
+    @Test func theLogRecordsWhichNotificationItWas() {
+        // Without this the log said "unmatched notification" and nothing more,
+        // so there was no way to review whether ignoring it was the right call.
+        var subject = engine()
+        _ = subject.decide(StampedEvent(
+            event: HookEvent(
+                kind: .notification, sessionID: "s1", cwd: "/p",
+                notificationType: "agent_completed", message: "done"),
+            at: t0))
+
+        #expect(subject.log.last?.detail == "agent_completed")
+        #expect(subject.log.last?.tierAssigned == .silentQueue)
+    }
+
+    @Test func theLogRecordsTheKindOfFailure() {
+        var subject = engine()
+        _ = subject.decide(StampedEvent(
+            event: HookEvent(
+                kind: .postToolUseFailure, sessionID: "s1", cwd: "/p",
+                error: "boom", errorType: "compile_error"),
+            at: t0))
+
+        #expect(subject.log.last?.detail == "compile_error")
+    }
+
+    @Test func detailIsAbsentWhenTheEventHasNoSubType() {
+        var subject = engine()
+        _ = subject.decide(StampedEvent(event: bash("swift build"), at: t0))
+        #expect(subject.log.last?.detail == nil)
+    }
+}
