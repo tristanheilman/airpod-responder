@@ -8,6 +8,8 @@ let package = Package(
         .target(name: "NavigatorCore"),
         .target(name: "NavigatorIO", dependencies: ["NavigatorCore"]),
         .executableTarget(name: "ReplayHarness", dependencies: ["NavigatorCore"]),
+        .executableTarget(
+            name: "navigator-hook", dependencies: ["NavigatorCore", "NavigatorIO"]),
         .testTarget(name: "NavigatorCoreTests", dependencies: ["NavigatorCore"]),
         .testTarget(name: "NavigatorIOTests", dependencies: ["NavigatorIO"]),
     ]
