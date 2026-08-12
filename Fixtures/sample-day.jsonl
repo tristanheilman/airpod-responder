@@ -3,15 +3,16 @@
 {"at":"2026-08-11T09:00:10Z","event":{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/Users/t/Projects/app","tool_name":"Read","tool_input":{"file_path":"/Users/t/Projects/app/src/parser.swift"}}}
 {"at":"2026-08-11T09:00:20Z","event":{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/Users/t/Projects/app","tool_name":"Edit","tool_input":{"file_path":"/Users/t/Projects/app/src/parser.swift"}}}
 {"at":"2026-08-11T09:00:30Z","event":{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/Users/t/Projects/app","tool_name":"Bash","tool_input":{"command":"swift test"}}}
-{"at":"2026-08-11T09:00:45Z","event":{"hook_event_name":"PostToolUseFailure","session_id":"s1","cwd":"/Users/t/Projects/app","message":"cannot find 'Token' in scope at line 12"}}
+{"at":"2026-08-11T09:00:45Z","event":{"hook_event_name":"PostToolUseFailure","session_id":"s1","cwd":"/Users/t/Projects/app","tool_name":"Bash","error":"cannot find 'Token' in scope at line 12","error_type":"compile_error"}}
 {"at":"2026-08-11T09:02:00Z","event":{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/Users/t/Projects/app","tool_name":"Bash","tool_input":{"command":"swift test"}}}
-{"at":"2026-08-11T09:02:20Z","event":{"hook_event_name":"PostToolUseFailure","session_id":"s1","cwd":"/Users/t/Projects/app","message":"cannot find 'Token' in scope at line 12"}}
+{"at":"2026-08-11T09:02:20Z","event":{"hook_event_name":"PostToolUseFailure","session_id":"s1","cwd":"/Users/t/Projects/app","tool_name":"Bash","error":"cannot find 'Token' in scope at line 12","error_type":"compile_error"}}
 {"at":"2026-08-11T09:05:00Z","event":{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/Users/t/Projects/app","tool_name":"Bash","tool_input":{"command":"swift test"}}}
-{"at":"2026-08-11T09:05:30Z","event":{"hook_event_name":"PostToolUseFailure","session_id":"s1","cwd":"/Users/t/Projects/app","message":"cannot find 'Token' in scope at line 12"}}
+{"at":"2026-08-11T09:05:30Z","event":{"hook_event_name":"PostToolUseFailure","session_id":"s1","cwd":"/Users/t/Projects/app","tool_name":"Bash","error":"cannot find 'Token' in scope at line 12","error_type":"compile_error"}}
 {"at":"2026-08-11T09:10:00Z","event":{"hook_event_name":"SessionStart","session_id":"s2","cwd":"/Users/t/Projects/homelab"}}
 {"at":"2026-08-11T09:10:05Z","event":{"hook_event_name":"UserPromptSubmit","session_id":"s2","cwd":"/Users/t/Projects/homelab","prompt":"update the caddy config"}}
 {"at":"2026-08-11T09:11:00Z","event":{"hook_event_name":"PreToolUse","session_id":"s2","cwd":"/Users/t/Projects/homelab","tool_name":"Write","tool_input":{"file_path":"/Users/t/.zshrc"}}}
 {"at":"2026-08-11T09:12:00Z","event":{"hook_event_name":"PreToolUse","session_id":"s2","cwd":"/Users/t/Projects/homelab","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}}
-{"at":"2026-08-11T09:15:00Z","event":{"hook_event_name":"Notification","session_id":"s1","cwd":"/Users/t/Projects/app","message":"agent_needs_input: which parser strategy?"}}
+{"at":"2026-08-11T09:15:00Z","event":{"hook_event_name":"Notification","session_id":"s1","cwd":"/Users/t/Projects/app","notification_type":"agent_needs_input","message":"which parser strategy?"}}
+{"at":"2026-08-11T09:16:00Z","event":{"hook_event_name":"Notification","session_id":"s2","cwd":"/Users/t/Projects/homelab","notification_type":"idle_prompt","message":"waiting for input"}}
 {"at":"2026-08-11T09:20:00Z","event":{"hook_event_name":"Stop","session_id":"s1","cwd":"/Users/t/Projects/app"}}
 {"at":"2026-08-11T09:20:01Z","event":{"hook_event_name":"SessionEnd","session_id":"s1","cwd":"/Users/t/Projects/app"}}

@@ -24,10 +24,18 @@ public enum Tier: String, Sendable, Codable, Equatable, CaseIterable {
     public var isBlocking: Bool { self == .decisionPoint }
 }
 
+/// The engine's verdict on a tool call.
+///
+/// Only `allow` and `deny` exist on the wire. `defer` is engine-internal and is
+/// rendered as *silence* — a hook that exits 0 with no output leaves the call to
+/// the normal permission flow, which is exactly the fallback we want. There is
+/// no `ask`: it has no wire representation, so modelling it would invent a
+/// behaviour the hook cannot actually produce.
 public enum PermissionDecision: String, Sendable, Codable, Equatable {
     case allow
+    /// Never emitted by the engine — see `BlastRadiusInvariant`. Present only
+    /// because the hook protocol defines it.
     case deny
-    case ask
     case `defer`
 }
 

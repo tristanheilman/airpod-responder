@@ -6,7 +6,7 @@ import Testing
     let subject = TierAssigner()
 
     private func preToolUse(_ r: Reversibility, _ route: RouteStatus) -> TierVerdict {
-        subject.assign(kind: .preToolUse, reversibility: r, route: route, message: nil)
+        subject.assign(kind: .preToolUse, reversibility: r, route: route, notificationType: nil)
     }
 
     @Test func reversibleOnRouteIsSilentAndAllowed() {
@@ -63,42 +63,61 @@ import Testing
     ])
     func mapsNonToolEventsToTiers(_ kind: HookEventKind, _ expected: Tier) {
         let verdict = subject.assign(
-            kind: kind, reversibility: .reversible, route: .onRoute, message: nil)
+            kind: kind, reversibility: .reversible, route: .onRoute, notificationType: nil)
         #expect(verdict.tier == expected)
         #expect(verdict.permission == nil, "only PreToolUse yields a permission verdict")
     }
 
     @Test(arguments: ["agent_needs_input", "permission_prompt"])
-    func matchedNotificationsNeedInput(_ message: String) {
+    func matchedNotificationsNeedInput(_ type: String) {
         let verdict = subject.assign(
-            kind: .notification, reversibility: .reversible, route: .onRoute, message: message)
+            kind: .notification, reversibility: .reversible,
+            route: .onRoute, notificationType: type)
         #expect(verdict.tier == .needsInput)
     }
 
-    @Test func unmatchedNotificationIsQueued() {
+    @Test(arguments: ["idle_prompt", "agent_completed", "auth_success", "elicitation_complete"])
+    func unmatchedNotificationTypesAreQueued(_ type: String) {
         let verdict = subject.assign(
             kind: .notification, reversibility: .reversible,
-            route: .onRoute, message: "compacting conversation")
+            route: .onRoute, notificationType: type)
+        #expect(verdict.tier == .silentQueue)
+    }
+
+    @Test func notificationMatchingIsExactNotSubstring() {
+        // notification_type is an enumerated field, so a near-miss must not
+        // match. Substring matching here would fire on unrelated types.
+        let verdict = subject.assign(
+            kind: .notification, reversibility: .reversible,
+            route: .onRoute, notificationType: "elicitation_agent_needs_input_complete")
+        #expect(verdict.tier == .silentQueue)
+    }
+
+    @Test func notificationWithNoTypeIsQueued() {
+        let verdict = subject.assign(
+            kind: .notification, reversibility: .reversible,
+            route: .onRoute, notificationType: nil)
         #expect(verdict.tier == .silentQueue)
     }
 
     @Test func fileChangedOffRouteAndIrreversibleSpeaks() {
         let verdict = subject.assign(
             kind: .fileChanged, reversibility: .irreversible(reason: "deletes files"),
-            route: .offRoute(reason: "outside project"), message: nil)
+            route: .offRoute(reason: "outside project"), notificationType: nil)
         #expect(verdict.tier == .speak)
     }
 
     @Test func fileChangedOffRouteAndReversibleEarcons() {
         let verdict = subject.assign(
             kind: .fileChanged, reversibility: .reversible,
-            route: .offRoute(reason: "outside project"), message: nil)
+            route: .offRoute(reason: "outside project"), notificationType: nil)
         #expect(verdict.tier == .earcon)
     }
 
     @Test func fileChangedOnRouteIsSilent() {
         let verdict = subject.assign(
-            kind: .fileChanged, reversibility: .reversible, route: .onRoute, message: nil)
+            kind: .fileChanged, reversibility: .reversible,
+            route: .onRoute, notificationType: nil)
         #expect(verdict.tier == .silent)
     }
 
@@ -127,7 +146,7 @@ import Testing
             for route in Self.routes {
                 for kind in HookEventKind.allCases {
                     let verdict = subject.assign(
-                        kind: kind, reversibility: r, route: route, message: nil)
+                        kind: kind, reversibility: r, route: route, notificationType: nil)
                     guard verdict.permission == .allow else { continue }
                     #expect(r == .reversible, "allowed a non-reversible action: \(kind) \(r)")
                     #expect(route == .onRoute, "allowed an off-route action: \(kind) \(route)")
@@ -141,7 +160,7 @@ import Testing
             for route in Self.routes {
                 for kind in HookEventKind.allCases {
                     let verdict = subject.assign(
-                        kind: kind, reversibility: r, route: route, message: nil)
+                        kind: kind, reversibility: r, route: route, notificationType: nil)
                     #expect(verdict.permission != .deny,
                             "auto-denied \(kind) — agents must never fail mysteriously")
                 }

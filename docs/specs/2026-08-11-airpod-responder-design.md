@@ -68,12 +68,30 @@ this works for any session in any directory with no per-project setup.
 
 ### Why hooks, not the alternatives
 
-`PreToolUse` hooks are synchronous and return
-`permissionDecision: "allow" | "deny" | "ask" | "defer"`. That means the hook is
-simultaneously the outbound event *and* the inbound answer channel — the daemon
-can speak a question and return your verdict as the hook's result. `Stop` can
-return `decision: "block"` with a reason, which is how a spoken redirect gets fed
-back into a conversation.
+`PreToolUse` hooks are synchronous, so the hook is simultaneously the outbound
+event *and* the inbound answer channel — the daemon can speak a question and
+return your verdict as the hook's result. `Stop` can return `decision: "block"`
+with a reason, which is how a spoken redirect gets fed back into a conversation.
+
+**Correction (verified against the hooks reference, 2026-08-11).** An earlier
+draft of this doc claimed `permissionDecision: "allow" | "deny" | "ask" |
+"defer"`. The real contract has only **`"allow"` and `"deny"`**. Deferring is
+still available and still means exactly what we wanted — it is just spelled
+*silence*:
+
+> Exit code 0 with no output means the hook has no decision to report, so the
+> tool call continues through the normal permission flow. The hook can deny the
+> call, but staying silent doesn't approve it.
+
+A timed-out hook behaves identically — it "doesn't block the tool call. The call
+continues through the normal permission flow." So the whole failure story below
+holds unchanged; `defer` is an engine-internal verdict that the wire encoder
+renders as an empty result. `"ask"` has no wire representation at all and is not
+modelled.
+
+`PermissionRequest` is a separate event that fires precisely when a tool call
+needs a permission decision. It is a closer fit for the voice-answer path than
+`PreToolUse` and should be evaluated in the daemon plan.
 
 Rejected alternatives:
 
@@ -124,8 +142,8 @@ sides means one set of `Codable` structs, so the contract cannot drift.
 | Tier | Delivery | Hook events |
 |---|---|---|
 | Decision point | **Speech**, blocking | `PreToolUse` |
-| Needs input | **Speech** | `Notification` matched on `agent_needs_input`, `permission_prompt`; `Elicitation` |
-| Off-route, irreversible | **Speech** | `PreToolUse` args; `FileChanged` via `watchPaths` |
+| Needs input | **Speech** | `Notification` matched on `notification_type` ∈ {`agent_needs_input`, `permission_prompt`}; `Elicitation` |
+| Off-route, irreversible | **Speech** | `PreToolUse` args; `FileChanged` |
 | Off-route, reversible | **Earcon** | same |
 | Failure | **Earcon**, coalesced | `PostToolUseFailure`, `StopFailure` |
 | Completion | **Silent queue** | `Stop`, `TaskCompleted`, `SubagentStop` |
@@ -291,6 +309,22 @@ replaced with numbers from real days.
 ## Open questions
 
 - Should `status` read the queue in priority order or session order?
-- Does the thrash detector need file-change data it doesn't currently receive?
-  (The engine's `FileChanged` handling assumes it does; the daemon plan must
-  confirm `watchPaths` can supply it.)
+
+### Answered: does the thrash detector get the file-change data it needs?
+
+Partly, and the limit is worth knowing before relying on it.
+
+There is **no `watchPaths` configuration** — that was invented in an earlier
+draft. `FileChanged` is configured with `matcher` set to *literal filenames*
+(e.g. `.envrc|.env`), and its payload carries `file_path` and `change_type`
+(`created|modified|deleted`).
+
+So file-change data exists, but only for filenames enumerated up front. It cannot
+tell you "some file in this project changed", which is what the thrash detector
+actually wants — it wants to know whether the agent made *any* progress between
+two identical failures.
+
+The engine therefore takes its progress signal from `PreToolUse` on a writing
+tool instead, which fires for every edit regardless of path and needs no
+configuration. `FileChanged` remains useful for the narrower job it is good at:
+noticing edits to a specific sensitive file.

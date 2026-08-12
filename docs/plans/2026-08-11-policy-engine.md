@@ -18,13 +18,14 @@
 - **Every decision produces a `DecisionRecord`**, including suppressed ones and silent ones.
 - All public types are `Sendable`. All enums with associated values are `Equatable`.
 - Swift Testing only. Do not use XCTest.
-- **`#expect` cannot contain a `mutating` call.** The macro expands its argument
-  into a closure whose captured receiver is immutable, so
-  `#expect(bucket.tryConsume(at: t0))` fails to compile with "cannot use mutating
-  member on immutable value: '$0' is immutable". Hoist the call into a `let`
-  first and assert on that. This applies to `TokenBucket.tryConsume`,
-  `SpeechBudget.admit`, `FailureCoalescer.admit`, and
-  `ThrashDetector.recordFailure`.
+- **`#expect` and `#require` cannot contain `mutating` or `throws` calls.** The
+  macros expand their argument into a closure that neither captures the receiver
+  mutably nor propagates `try`. `#expect(bucket.tryConsume(at: t0))` fails with
+  "cannot use mutating member on immutable value: '$0' is immutable", and
+  `#require(HookOutput.encode(...))` fails with "call can throw, but it is not
+  marked with 'try'". Hoist into a `let` first, then assert. Applies to
+  `TokenBucket.tryConsume`, `SpeechBudget.admit`, `FailureCoalescer.admit`,
+  `ThrashDetector.recordFailure`, and `HookOutput.encode`.
 - Package platform floor is `.macOS("14.0")`. The core is pure and must stay buildable without the daemon's macOS 26 dependencies.
 
 ---
@@ -2733,7 +2734,7 @@ Deliberately out of scope for this plan; each belongs to a later one.
 - **Host familiarity.** `WebFetch` is `.unknown` and always defers. An allowlist needs a config surface that does not exist yet.
 - **`declaredDirs` is always empty.** The registry carries the field and the route classifier honours it, but nothing populates it until the daemon can read Claude Code's configuration.
 - **Answer latency in replay.** The harness resolves every blocking question instantly. Real answers take seconds, during which the concurrency gate defers other questions — so replay understates deferrals. Model this once real timing data exists.
-- **`FileChanged` reversibility.** The tier table handles it, but nothing produces `FileChanged` events until `watchPaths` is wired up in the daemon plan. This is open question #2 in the design doc.
+- **`FileChanged` coverage.** The tier table handles the event, but there is no `watchPaths` config — `FileChanged` takes a `matcher` of literal filenames, so it only fires for files enumerated up front and cannot serve as a general "did anything change" signal. The thrash detector therefore takes its progress signal from `PreToolUse` on a writing tool, which needs no configuration. Verified against the hooks reference on 2026-08-11; this closes open question #2 in the design doc.
 
 ---
 

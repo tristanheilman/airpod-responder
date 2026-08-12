@@ -1,8 +1,12 @@
 import Foundation
 
 public struct TierAssigner: Sendable {
-    /// Notification payloads that mean the agent is stopped and waiting on you.
-    private static let inputNeededMarkers = ["agent_needs_input", "permission_prompt"]
+    /// `notification_type` values that mean the agent is stopped and waiting on
+    /// you. Matched exactly: the field is enumerated, so a substring match would
+    /// fire on unrelated types that merely contain one of these as a fragment.
+    private static let inputNeededTypes: Set<String> = [
+        "agent_needs_input", "permission_prompt",
+    ]
 
     public init() {}
 
@@ -10,16 +14,14 @@ public struct TierAssigner: Sendable {
         kind: HookEventKind,
         reversibility: Reversibility,
         route: RouteStatus,
-        message: String?
+        notificationType: String?
     ) -> TierVerdict {
         switch kind {
         case .preToolUse:
             return assignToolCall(reversibility: reversibility, route: route)
 
         case .notification:
-            let matched = Self.inputNeededMarkers.contains {
-                message?.contains($0) ?? false
-            }
+            let matched = notificationType.map(Self.inputNeededTypes.contains) ?? false
             return TierVerdict(
                 tier: matched ? .needsInput : .silentQueue,
                 permission: nil,

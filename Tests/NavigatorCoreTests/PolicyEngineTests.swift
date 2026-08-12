@@ -90,7 +90,7 @@ import Testing
     @Test func repeatedFailuresCoalesceToOneEarcon() {
         var subject = engine()
         let failure = HookEvent(
-            kind: .postToolUseFailure, sessionID: "s1", cwd: "/p", message: "boom at line 3")
+            kind: .postToolUseFailure, sessionID: "s1", cwd: "/p", error: "boom at line 3")
 
         let first = subject.decide(StampedEvent(event: failure, at: t0))
         let second = subject.decide(StampedEvent(event: failure, at: t0.addingTimeInterval(5)))
@@ -104,7 +104,7 @@ import Testing
         var subject = engine()
         let failure = HookEvent(
             kind: .postToolUseFailure, sessionID: "s1", cwd: "/p",
-            message: "cannot find 'Foo' in scope at line 12")
+            error: "cannot find 'Foo' in scope at line 12")
 
         _ = subject.decide(StampedEvent(event: failure, at: t0))
         _ = subject.decide(StampedEvent(event: failure, at: t0.addingTimeInterval(100)))
@@ -114,10 +114,32 @@ import Testing
         #expect(third.utterance?.contains("stuck") == true)
     }
 
+    @Test func threeUnrelatedFailuresDoNotTripThrash() {
+        // Regression: the signature was built from `message`, which failure
+        // events never carry. Every failure hashed to "<none>", so any three
+        // errors — however unrelated — looked like a stuck session.
+        var subject = engine()
+        let errors = [
+            "cannot find 'Foo' in scope",
+            "network timeout contacting registry",
+            "permission denied writing /tmp/x",
+        ]
+
+        var last: Decision?
+        for (i, message) in errors.enumerated() {
+            let failure = HookEvent(
+                kind: .postToolUseFailure, sessionID: "s1", cwd: "/p", error: message)
+            last = subject.decide(
+                StampedEvent(event: failure, at: t0.addingTimeInterval(Double(i) * 100)))
+        }
+
+        #expect(last?.tier != .speak)
+    }
+
     @Test func fileChangeBetweenFailuresPreventsThrashPromotion() {
         var subject = engine()
         let failure = HookEvent(
-            kind: .postToolUseFailure, sessionID: "s1", cwd: "/p", message: "same error at line 12")
+            kind: .postToolUseFailure, sessionID: "s1", cwd: "/p", error: "same error at line 12")
         let edit = HookEvent(
             kind: .preToolUse, sessionID: "s1", cwd: "/p",
             toolName: "Edit", toolInput: ["file_path": .string("/p/a.swift")])

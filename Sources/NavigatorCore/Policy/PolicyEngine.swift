@@ -45,7 +45,8 @@ public struct PolicyEngine: Sendable {
         let route = routeClassifier.classify(
             toolName: event.toolName, toolInput: event.toolInput, session: session)
         var verdict = tierAssigner.assign(
-            kind: event.kind, reversibility: reversibility, route: route, message: event.message)
+            kind: event.kind, reversibility: reversibility, route: route,
+            notificationType: event.notificationType)
 
         verdict = promoteThrash(verdict, event: event, at: stamped.at)
 
@@ -108,7 +109,10 @@ public struct PolicyEngine: Sendable {
     ) -> TierVerdict {
         guard isFailure(event.kind) else { return verdict }
 
-        let signature = ThrashDetector.signature(from: event.message)
+        // `error`, not `message` — failures carry their detail in `error`, and
+        // fingerprinting the always-nil field would collapse every failure to
+        // one signature, firing thrash on three unrelated errors.
+        let signature = ThrashDetector.signature(from: event.failureDetail)
         guard case .thrashing(_, let elapsed, _) = thrash.recordFailure(
             sessionID: event.sessionID, signature: signature, at: now)
         else { return verdict }
