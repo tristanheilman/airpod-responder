@@ -50,4 +50,56 @@ public enum InputDeviceMonitor {
     public static func shouldSuppressAudio() -> Bool {
         suppress(given: isInputInUse())
     }
+
+    // MARK: - Diagnostics
+
+    public struct DeviceReport: Sendable {
+        public let outputName: String?
+        public let inputName: String?
+        public let inputInUse: Bool?
+        public var willSpeak: Bool { !suppress(given: inputInUse) }
+    }
+
+    /// Reports what the suppression logic can currently see.
+    ///
+    /// Exists because the interesting case cannot be reproduced on a machine
+    /// with no input device: without headphones connected this only ever
+    /// returns `inputInUse == nil`, so the branch that actually silences the
+    /// tool is never exercised. This makes that checkable in one command.
+    public static func report() -> DeviceReport {
+        DeviceReport(
+            outputName: defaultDevice(kAudioHardwarePropertyDefaultOutputDevice).map(name(of:)),
+            inputName: defaultDevice(kAudioHardwarePropertyDefaultInputDevice).map(name(of:)),
+            inputInUse: isInputInUse())
+    }
+
+    private static func defaultDevice(
+        _ selector: AudioObjectPropertySelector
+    ) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+
+        var device = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device)
+
+        return (status == noErr && device != AudioDeviceID(0)) ? device : nil
+    }
+
+    private static func name(of device: AudioDeviceID) -> String {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+
+        var value: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        let status = withUnsafeMutablePointer(to: &value) {
+            AudioObjectGetPropertyData(device, &address, 0, nil, &size, $0)
+        }
+        return status == noErr ? (value as String) : "<unnamed>"
+    }
 }

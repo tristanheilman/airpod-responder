@@ -28,6 +28,8 @@ func usage() -> Never {
       catch-up              everything since you last asked
       sessions              what every live session is doing
       say <text>            speak something, to check the audio path
+      audio [--speak]       report audio devices and whether it would be
+                            suppressed; --speak also plays a test phrase
       mute / unmute         stop and start talking
 
     setup
@@ -345,6 +347,39 @@ case "service":
         FileHandle.standardError.write(
             Data("usage: navigator service install|uninstall|restart|status\n".utf8))
         exit(2)
+    }
+
+case "audio":
+    let report = InputDeviceMonitor.report()
+    print("output device   \(report.outputName ?? "none")")
+    print("input device    \(report.inputName ?? "none")")
+
+    switch report.inputInUse {
+    case nil:
+        print("input in use    cannot tell (no input device, or the query failed)")
+    case true?:
+        print("input in use    YES")
+    case false?:
+        print("input in use    no")
+    }
+
+    print("would speak     \(report.willSpeak ? "yes" : "NO — audio is being suppressed")")
+
+    if report.inputInUse == true {
+        print("""
+
+            If nothing is actually using your microphone, this is a false
+            positive and the tool will stay silent for as long as it lasts.
+            Report the device name above — the suppression check needs to
+            distinguish 'connected' from 'recording' on this hardware.
+            """)
+    }
+
+    if arguments.contains("--speak") {
+        // Deliberately not routed through the daemon: this checks the audio
+        // path itself, so it must not be suppressed by anything.
+        SystemSpeaker().say("Audio check. If you can hear this, output works.")
+        Thread.sleep(forTimeInterval: 3)
     }
 
 case "repeat":   sendControl(.repeatLast)
