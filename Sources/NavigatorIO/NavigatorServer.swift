@@ -75,6 +75,13 @@ public final class NavigatorServer: @unchecked Sendable {
         stateLock.unlock()
 
         listener?.close()
+
+        // Drain the logging queue before returning. Records are appended
+        // asynchronously so disk never sits on the hook's critical path, which
+        // means a shutdown that does not wait here silently discards whatever
+        // was still in flight — the last few decisions of every session.
+        logging.sync {}
+
         unlink(socketPath)
     }
 
@@ -109,7 +116,16 @@ public final class NavigatorServer: @unchecked Sendable {
         }
 
         if let log, let record {
-            logging.async { try? log.append(record, on: record.at) }
+            logging.async {
+                do {
+                    try log.append(record, on: record.at)
+                } catch {
+                    // The log is this build's entire product. A silent failure
+                    // here would look exactly like a quiet day.
+                    FileHandle.standardError.write(
+                        Data("navigator: cannot write decision log: \(error)\n".utf8))
+                }
+            }
         }
     }
 }

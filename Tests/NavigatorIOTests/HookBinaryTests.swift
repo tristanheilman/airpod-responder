@@ -3,7 +3,10 @@ import Testing
 @testable import NavigatorCore
 @testable import NavigatorIO
 
-@Suite struct HookBinaryContract {
+/// Serialized because every test here spawns a subprocess; running them against
+/// the rest of the suite concurrently starves the daemon's worker queue and the
+/// hook gives up on its deadline before a reply arrives.
+@Suite(.serialized) struct HookBinaryContract {
     /// Resolved from this file's path rather than `Bundle.main`, which points at
     /// the xctest harness and moves around between toolchains. `.build/debug` is
     /// a stable symlink to the current triple's products directory.
@@ -17,7 +20,12 @@ import Testing
 
     private struct Outcome { let status: Int32; let stdout: String; let stderr: String }
 
-    private func run(stdin: String, socket: String, deadlineMS: Int = 250) throws -> Outcome {
+    /// The default deadline here is deliberately far looser than production's
+    /// 250ms. These tests check the hook's *contract* — what it prints and what
+    /// it exits with — and a CI box mid-suite is nothing like an idle daemon.
+    /// Actual latency is pinned by `EndToEnd.medianRoundTripStaysUnder...`,
+    /// which measures it directly instead of inferring it from a timeout.
+    private func run(stdin: String, socket: String, deadlineMS: Int = 3000) throws -> Outcome {
         let process = Process()
         process.executableURL = hookURL
         process.environment = [

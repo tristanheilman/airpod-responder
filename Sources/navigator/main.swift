@@ -29,6 +29,11 @@ guard arguments.count >= 2 else { usage() }
 switch arguments[1] {
 
 case "run":
+    // stdout is fully buffered when redirected to a file or pipe, which is how a
+    // daemon is normally run. Without this its banner and any diagnostics sit in
+    // the buffer indefinitely and the log looks empty while it is working fine.
+    setvbuf(stdout, nil, _IOLBF, 0)
+
     let socketPath = ProcessInfo.processInfo.environment["NAVIGATOR_SOCKET"] ?? defaultSocket
     let server = NavigatorServer(
         socketPath: socketPath,
@@ -47,8 +52,27 @@ case "run":
     print("logging to \(defaultLogDir.path)")
     print("wire gate CLOSED — no decisions are returned to Claude Code")
 
-    signal(SIGINT) { _ in exit(0) }
-    signal(SIGTERM) { _ in exit(0) }
+    // DispatchSourceSignal rather than signal(): its handler runs on a normal
+    // queue, where stopping the server and draining the log queue are safe.
+    // A C signal handler may call almost nothing, so the obvious
+    // `signal(SIGTERM) { _ in exit(0) }` would abandon in-flight log writes and
+    // leave the socket file behind.
+    signal(SIGINT, SIG_IGN)
+    signal(SIGTERM, SIG_IGN)
+
+    let shutdown: @Sendable () -> Void = {
+        print("\nnavigator stopping — draining decision log")
+        server.stop()
+        exit(0)
+    }
+
+    let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+    let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+    sigint.setEventHandler(handler: shutdown)
+    sigterm.setEventHandler(handler: shutdown)
+    sigint.resume()
+    sigterm.resume()
+
     dispatchMain()
 
 case "install":

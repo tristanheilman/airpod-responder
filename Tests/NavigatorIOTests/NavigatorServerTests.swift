@@ -115,6 +115,43 @@ import Testing
         #expect(records.first?.permission == .defer)
     }
 
+    @Test func stopDrainsPendingLogWrites() throws {
+        // Records are appended asynchronously so disk stays off the hook's
+        // critical path. A stop that does not wait therefore drops whatever is
+        // still queued — in practice the last few decisions of every session.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("navdrain-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let path = tempPath()
+        let log = DecisionLog(directory: dir)
+        let day = Date(timeIntervalSince1970: 1_770_000_000)
+        let server = NavigatorServer(
+            socketPath: path, log: log, config: .default, startingAt: day)
+        try server.start()
+
+        for _ in 0..<10 { _ = try exchange(path, request("swift build")) }
+
+        // No sleep: stop() must do the waiting.
+        server.stop()
+
+        let records = try DecisionLog.replayable(from: log.path(for: day))
+        #expect(records.count == 10, "lost \(10 - records.count) records on shutdown")
+    }
+
+    @Test func stopRemovesTheSocketFile() throws {
+        let path = tempPath()
+        let server = NavigatorServer(
+            socketPath: path, log: nil, config: .default,
+            startingAt: Date(timeIntervalSince1970: 1_770_000_000))
+        try server.start()
+        #expect(FileManager.default.fileExists(atPath: path))
+
+        server.stop()
+        #expect(!FileManager.default.fileExists(atPath: path),
+                "a stale socket left behind confuses the next status check")
+    }
+
     @Test func malformedRequestDoesNotKillTheServer() throws {
         let path = tempPath()
         let server = NavigatorServer(
