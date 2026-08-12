@@ -6,13 +6,17 @@ let package = Package(
     platforms: [.macOS("14.0")],
     targets: [
         .target(name: "NavigatorCore"),
-        .target(name: "NavigatorIO", dependencies: ["NavigatorCore"]),
+        .target(name: "NavigatorAudio", dependencies: ["NavigatorCore"]),
+        .target(name: "NavigatorIO", dependencies: ["NavigatorCore", "NavigatorAudio"]),
         .executableTarget(name: "ReplayHarness", dependencies: ["NavigatorCore"]),
         .executableTarget(
-            name: "navigator", dependencies: ["NavigatorCore", "NavigatorIO"]),
+            name: "navigator",
+            dependencies: ["NavigatorCore", "NavigatorAudio", "NavigatorIO"]),
         .executableTarget(
             name: "navigator-hook", dependencies: ["NavigatorCore", "NavigatorIO"]),
         .testTarget(name: "NavigatorCoreTests", dependencies: ["NavigatorCore"]),
-        .testTarget(name: "NavigatorIOTests", dependencies: ["NavigatorIO"]),
+        .testTarget(name: "NavigatorAudioTests", dependencies: ["NavigatorAudio"]),
+        .testTarget(
+            name: "NavigatorIOTests", dependencies: ["NavigatorIO", "NavigatorAudio"]),
     ]
 )
