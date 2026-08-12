@@ -17,6 +17,11 @@ func usage() -> Never {
     daemon
       run                   start the daemon in the foreground
       status                report whether a daemon is listening
+      service install       keep it running via launchd (starts at login)
+              [--apply]     prints the job and changes nothing without this
+      service restart       restart the launchd job
+      service uninstall     remove the launchd job
+      service status        whether launchd has it, and whether it answers
 
     listening
       repeat                say the last thing you were told again
@@ -39,6 +44,24 @@ func usage() -> Never {
 
     """.utf8))
     exit(2)
+}
+
+/// Runs launchctl and returns (status, combined output).
+@discardableResult
+func launchctl(_ arguments: [String]) -> (status: Int32, output: String) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    process.arguments = arguments
+
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+
+    do { try process.run() } catch { return (-1, "cannot run launchctl: \(error)") }
+
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    return (process.terminationStatus, String(decoding: data, as: UTF8.self))
 }
 
 /// Sends a control command to a running daemon and prints its reply.
@@ -226,6 +249,102 @@ case "status":
         // Not an error: "no daemon" is a supported state, and hooks degrade to
         // silence when it is true.
         print("no daemon on \(socketPath) — sessions run unaffected")
+    }
+
+case "service":
+    let uid = getuid()
+    let plistURL = LaunchAgent.plistURL(home: home as String)
+    let action = arguments.count >= 3 ? arguments[2] : "status"
+
+    switch action {
+    case "install":
+        let programPath = URL(fileURLWithPath: home.appendingPathComponent(".claude/bin/navigator"))
+        guard FileManager.default.isExecutableFile(atPath: programPath.path) else {
+            FileHandle.standardError.write(Data("""
+                no installed binary at \(programPath.path)
+                run `navigator install --apply` first — launchd needs a stable path,
+                not one inside .build/
+                """.utf8))
+            exit(1)
+        }
+
+        let contents = LaunchAgent.plist(
+            programPath: programPath.path,
+            logPath: defaultLogDir.appendingPathComponent("daemon.log").path)
+
+        guard arguments.contains("--apply") else {
+            let data = try PropertyListSerialization.data(
+                fromPropertyList: contents, format: .xml, options: 0)
+            print("Would write \(plistURL.path):\n")
+            print(String(decoding: data, as: UTF8.self))
+            print("then: launchctl bootstrap \(LaunchAgent.domainTarget(uid: uid)) \(plistURL.path)")
+            print("\nRe-run with --apply to do it.")
+            exit(0)
+        }
+
+        try FileManager.default.createDirectory(
+            at: plistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: defaultLogDir, withIntermediateDirectories: true)
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: contents, format: .xml, options: 0)
+        try data.write(to: plistURL)
+
+        // Replacing an existing job: bootout first, ignoring the failure when
+        // nothing was loaded, because bootstrap refuses a duplicate label.
+        launchctl(["bootout", LaunchAgent.serviceTarget(uid: uid)])
+        let result = launchctl(
+            ["bootstrap", LaunchAgent.domainTarget(uid: uid), plistURL.path])
+        guard result.status == 0 else {
+            FileHandle.standardError.write(
+                Data("launchctl bootstrap failed (\(result.status)): \(result.output)\n".utf8))
+            exit(1)
+        }
+        print("Installed \(LaunchAgent.label)")
+        print("It starts at login and restarts if it dies.")
+        print("Logs: \(defaultLogDir.appendingPathComponent("daemon.log").path)")
+
+    case "uninstall":
+        launchctl(["bootout", LaunchAgent.serviceTarget(uid: uid)])
+        try? FileManager.default.removeItem(at: plistURL)
+        print("Removed \(LaunchAgent.label)")
+
+    case "restart":
+        // -k kills the running instance first; without it kickstart is a no-op
+        // on an already-running job, which is exactly when you want a restart.
+        let result = launchctl(["kickstart", "-k", LaunchAgent.serviceTarget(uid: uid)])
+        guard result.status == 0 else {
+            FileHandle.standardError.write(
+                Data("not loaded? \(result.output)\nTry: navigator service install --apply\n".utf8))
+            exit(1)
+        }
+        print("Restarted \(LaunchAgent.label)")
+
+    case "status":
+        let loaded = launchctl(["print", LaunchAgent.serviceTarget(uid: uid)])
+        if loaded.status == 0 {
+            let pid = loaded.output
+                .split(separator: "\n")
+                .first { $0.contains("pid = ") }?
+                .trimmingCharacters(in: .whitespaces) ?? "loaded"
+            print("launchd job loaded — \(pid)")
+        } else {
+            print("launchd job not loaded")
+            print("install it with: navigator service install --apply")
+        }
+        // The socket is the truth about whether it is actually serving.
+        let socketPath = ProcessInfo.processInfo.environment["NAVIGATOR_SOCKET"] ?? defaultSocket
+        if let socket = try? UnixSocket.connect(to: socketPath, timeout: 0.2) {
+            socket.close()
+            print("daemon answering on \(socketPath)")
+        } else {
+            print("nothing answering on \(socketPath)")
+        }
+
+    default:
+        FileHandle.standardError.write(
+            Data("usage: navigator service install|uninstall|restart|status\n".utf8))
+        exit(2)
     }
 
 case "repeat":   sendControl(.repeatLast)
