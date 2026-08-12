@@ -58,6 +58,40 @@ public enum HookInstaller {
         return result
     }
 
+    /// Strips every hook entry whose command contains `needle`, leaving other
+    /// tools' hooks and every other setting untouched.
+    ///
+    /// Uninstalling matters more than installing: settings left pointing at a
+    /// deleted binary is exactly the quiet failure the stable prefix exists to
+    /// prevent, and the user needs a way back out.
+    public static func removed(
+        from settings: [String: Any], matching needle: String
+    ) -> (settings: [String: Any], count: Int) {
+        guard var hooks = settings["hooks"] as? [String: Any] else { return (settings, 0) }
+        var removed = 0
+
+        for (event, value) in hooks {
+            guard let groups = value as? [[String: Any]] else { continue }
+
+            let kept: [[String: Any]] = groups.compactMap { group in
+                guard var entries = group["hooks"] as? [[String: Any]] else { return group }
+                let before = entries.count
+                entries.removeAll { ($0["command"] as? String)?.contains(needle) == true }
+                removed += before - entries.count
+                if entries.isEmpty { return nil }
+                var updated = group
+                updated["hooks"] = entries
+                return updated
+            }
+
+            if kept.isEmpty { hooks.removeValue(forKey: event) } else { hooks[event] = kept }
+        }
+
+        var result = settings
+        if hooks.isEmpty { result.removeValue(forKey: "hooks") } else { result["hooks"] = hooks }
+        return (result, removed)
+    }
+
     private static func entry(hookPath: String, timeout: Int) -> [String: Any] {
         // The explicit timeout matters: the default for command hooks is 600
         // seconds, which would let a wedged daemon stall a session for ten

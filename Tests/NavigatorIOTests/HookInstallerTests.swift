@@ -105,3 +105,51 @@ import Testing
         #expect(!data.isEmpty)
     }
 }
+
+@Suite struct HookUninstalling {
+    @Test func removesOnlyNavigatorEntries() throws {
+        let installed = HookInstaller.merged(
+            into: ["hooks": ["PreToolUse": [
+                ["hooks": [["type": "command", "command": "/other/tool"]]]
+            ]]],
+            hookPath: "/Users/t/.claude/bin/navigator-hook", timeoutSeconds: 5)
+
+        let result = HookInstaller.removed(from: installed, matching: "navigator-hook")
+        let hooks = try #require(result.settings["hooks"] as? [String: Any])
+        let preToolUse = try #require(hooks["PreToolUse"] as? [[String: Any]])
+        let commands = preToolUse
+            .compactMap { $0["hooks"] as? [[String: Any]] }
+            .flatMap { $0 }
+            .compactMap { $0["command"] as? String }
+
+        #expect(commands == ["/other/tool"])
+        #expect(result.count == HookInstaller.observedEvents.count)
+    }
+
+    @Test func preservesUnrelatedSettings() throws {
+        let installed = HookInstaller.merged(
+            into: ["theme": "dark-ansi"],
+            hookPath: "/x/navigator-hook", timeoutSeconds: 5)
+
+        let result = HookInstaller.removed(from: installed, matching: "navigator-hook")
+        #expect(result.settings["theme"] as? String == "dark-ansi")
+        // Nothing else used hooks, so the empty key is dropped rather than left
+        // as a confusing husk.
+        #expect(result.settings["hooks"] == nil)
+    }
+
+    @Test func isSafeOnSettingsWithNoHooks() {
+        let result = HookInstaller.removed(from: ["theme": "x"], matching: "navigator-hook")
+        #expect(result.count == 0)
+        #expect(result.settings["theme"] as? String == "x")
+    }
+
+    @Test func roundTripsBackToTheOriginal() throws {
+        let original: [String: Any] = ["theme": "dark-ansi", "effortLevel": "high"]
+        let installed = HookInstaller.merged(
+            into: original, hookPath: "/x/navigator-hook", timeoutSeconds: 5)
+        let result = HookInstaller.removed(from: installed, matching: "navigator-hook")
+
+        #expect(result.settings.keys.sorted() == original.keys.sorted())
+    }
+}
