@@ -30,9 +30,15 @@ public enum HookOutput {
     }
 
     /// Returns the JSON to print, or `nil` when the hook must print nothing.
+    ///
+    /// `emitDecisions: false` is the observer build's guarantee. It short-circuits
+    /// before any other consideration, so no decision — not even a malformed one —
+    /// can reach Claude Code. That is a property of this function rather than of
+    /// the policy engine's correctness, which is why it is checked exhaustively.
     public static func encode(
-        _ decision: Decision, for kind: HookEventKind
+        _ decision: Decision, for kind: HookEventKind, emitDecisions: Bool = true
     ) throws -> String? {
+        guard emitDecisions else { return nil }
         guard kind == .preToolUse else { return nil }
         guard let permission = decision.permission else { return nil }
 

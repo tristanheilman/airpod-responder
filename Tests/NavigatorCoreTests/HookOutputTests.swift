@@ -70,3 +70,50 @@ import Testing
         #expect(!json.contains("\n"))
     }
 }
+
+@Suite struct WireGate {
+    /// Every decision the engine can possibly produce.
+    private static let decisions: [Decision] = {
+        var all: [Decision] = []
+        for tier in Tier.allCases {
+            for permission: PermissionDecision? in [nil, .allow, .defer, .deny] {
+                all.append(Decision(
+                    tier: tier, permission: permission,
+                    utterance: nil, reason: "r", blocking: tier.isBlocking))
+            }
+        }
+        return all
+    }()
+
+    @Test func closedGateEmitsNothingForAnyInputAtAll() throws {
+        // This is the observer-build safety guarantee: not "the engine won't
+        // decide badly", but "nothing the engine decides can reach the wire".
+        for decision in Self.decisions {
+            for kind in HookEventKind.allCases {
+                let out = try HookOutput.encode(decision, for: kind, emitDecisions: false)
+                #expect(out == nil,
+                        "gate leaked for \(kind) \(String(describing: decision.permission))")
+            }
+        }
+    }
+
+    @Test func closedGateDoesNotThrowOnDeny() throws {
+        // With the gate shut, deny is not an error — nothing is being emitted,
+        // so there is nothing to refuse. The throw belongs to the open gate.
+        let deny = Decision(tier: .silent, permission: .deny,
+                            utterance: nil, reason: "r", blocking: false)
+        let out = try HookOutput.encode(deny, for: .preToolUse, emitDecisions: false)
+        #expect(out == nil)
+    }
+
+    @Test func openGateStillEmitsAllow() throws {
+        let allow = Decision(tier: .silent, permission: .allow,
+                             utterance: nil, reason: "ok", blocking: false)
+        let out = try HookOutput.encode(allow, for: .preToolUse, emitDecisions: true)
+        #expect(out != nil)
+    }
+
+    @Test func defaultConfigHasTheGateClosed() {
+        #expect(PolicyConfig.default.emitDecisions == false)
+    }
+}
