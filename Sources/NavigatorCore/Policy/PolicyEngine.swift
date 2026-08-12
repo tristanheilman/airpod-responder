@@ -98,7 +98,7 @@ public struct PolicyEngine: Sendable {
             suppressedBecause: suppression,
             permission: decision.permission,
             reason: decision.reason,
-            detail: event.notificationType ?? event.errorType))
+            detail: event.notificationType ?? event.errorType ?? Self.programName(of: event)))
 
         // Only the newest record is ever read from here, and the durable copy is
         // on disk. Keeping the rest is a leak in a process that now runs for
@@ -160,6 +160,20 @@ public struct PolicyEngine: Sendable {
             reason: "stuck on the same error for \(minutes) minute\(minutes == 1 ? "" : "s")")
     }
 
+    /// The program a Bash call runs, with no arguments.
+    ///
+    /// Enough to answer "what was that?" about an announcement, without writing
+    /// command lines — which routinely carry tokens and passwords — to a
+    /// plaintext log.
+    static func programName(of event: HookEvent) -> String? {
+        guard let command = event.command else { return nil }
+        return ReversibilityClassifier.segments(of: command)
+            .lazy
+            .compactMap { ReversibilityClassifier.effectiveTokens(
+                ReversibilityClassifier.tokenize($0)).first }
+            .first
+    }
+
     private func isFailure(_ kind: HookEventKind) -> Bool {
         kind == .postToolUseFailure || kind == .stopFailure
     }
@@ -181,9 +195,10 @@ public struct PolicyEngine: Sendable {
         case .decisionPoint:
             // Only ask when an answer can reach us. Otherwise this is a heads-up
             // and should say so, or it invites a reply into a void.
+            let what = Self.programName(of: event).map { " Running \($0)." } ?? ""
             return canAcceptAnswers
-                ? "\(name) wants to \(verdict.reason). Approve?"
-                : "\(name) is about to \(verdict.reason). Check your screen." 
+                ? "\(name) wants to \(verdict.reason).\(what) Approve?"
+                : "\(name) is about to \(verdict.reason).\(what) Check your screen." 
         case .needsInput:
             return "\(name) needs you."
         case .speak:

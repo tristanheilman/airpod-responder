@@ -162,7 +162,7 @@ import Testing
             StampedEvent(event: bash("git push --force origin main"), at: t0))
 
         #expect(decision.utterance
-            == "p is about to force push, which rewrites remote history. Check your screen.")
+            == "p is about to force push, which rewrites remote history. Running git. Check your screen.")
     }
 
     @Test func offRouteSentenceReadsAsOneClause() {
@@ -407,9 +407,17 @@ extension PolicyEngineBehavior {
         #expect(subject.log.last?.detail == "compile_error")
     }
 
-    @Test func detailIsAbsentWhenTheEventHasNoSubType() {
+    @Test func detailCarriesTheProgramForToolCalls() {
+        // For a Bash call the discriminator is which program ran.
         var subject = engine()
         _ = subject.decide(StampedEvent(event: bash("swift build"), at: t0))
+        #expect(subject.log.last?.detail == "swift")
+    }
+
+    @Test func detailIsAbsentWhenThereIsNothingToName() {
+        var subject = engine()
+        _ = subject.decide(StampedEvent(
+            event: HookEvent(kind: .stop, sessionID: "s1", cwd: "/p"), at: t0))
         #expect(subject.log.last?.detail == nil)
     }
 }
@@ -458,5 +466,41 @@ extension PolicyEngineBehavior {
         let decision = force(&subject)
         #expect(decision.utterance?.contains("force push") == true)
         #expect(decision.utterance?.contains("p") == true)
+    }
+}
+
+@Suite struct AnnouncementsAreIdentifiable {
+    let t0 = Date(timeIntervalSince1970: 1_770_000_000)
+
+    private func engine() -> PolicyEngine {
+        var engine = PolicyEngine(startingAt: t0)
+        _ = engine.decide(StampedEvent(
+            event: HookEvent(kind: .sessionStart, sessionID: "s1", cwd: "/p"), at: t0))
+        return engine
+    }
+
+    private func ssh(_ subject: inout PolicyEngine) -> Decision {
+        subject.decide(StampedEvent(
+            event: HookEvent(
+                kind: .preToolUse, sessionID: "s1", cwd: "/p", toolName: "Bash",
+                toolInput: ["command": .string("ssh homelab.local uptime")]),
+            at: t0))
+    }
+
+    @Test func theLogSaysWhichProgramItWas() {
+        // "act on a remote host" fired seven times in real use and neither the
+        // user nor the log could say what any of them ran. The program name
+        // answers that without writing arguments — which carry tokens and
+        // passwords — to a plaintext file.
+        var subject = engine()
+        _ = ssh(&subject)
+        #expect(subject.log.last?.detail == "ssh")
+    }
+
+    @Test func itNamesTheProgramOutLoud() {
+        var subject = engine()
+        let decision = ssh(&subject)
+        #expect(decision.utterance?.contains("ssh") == true,
+                "got: \(decision.utterance ?? "nil")")
     }
 }
