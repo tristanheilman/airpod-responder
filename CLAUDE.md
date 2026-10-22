@@ -7,8 +7,8 @@ and the implementation plans are in `docs/`.
 
 - **No AI attribution in anything committed.** No `Co-Authored-By`, no
   `Claude-Session:` trailer, no "Generated with" line — in commit messages, PR
-  bodies, code comments, or docs. The history before 2026-10-21 has these and is
-  being left alone; nothing after it may.
+  bodies, code comments, or docs. The history was rewritten clean before its
+  first push; nothing may reintroduce them.
 - Tests first. Every suite runs silent, against `RecordingSpeaker`; nothing in
   `swift test` may make a sound or need hardware.
 - `NavigatorCore` stays pure: no I/O, no clock reads. Anything that touches a
