@@ -49,13 +49,80 @@ import Testing
     }
 
     @Test func aFileCannotOpenTheWireGate() throws {
-        // The gate is a code-level decision for this build. Letting a stray
-        // config file flip it would undo the guarantee the observer rests on.
+        // The switch alone is not enough. A config edit meant to change
+        // speechInterval must not be able to open the gate by typo or by
+        // copying an example.
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
         try #"{"emitDecisions": true}"#.write(to: url, atomically: true, encoding: .utf8)
 
         #expect(ConfigFile.load(from: url).emitDecisions == false)
+    }
+
+    @Test func theAcknowledgementAloneDoesNotOpenItEither() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try #"{"iUnderstandThisAnswersClaudeCode": true}"#
+            .write(to: url, atomically: true, encoding: .utf8)
+
+        #expect(ConfigFile.load(from: url).emitDecisions == false)
+    }
+
+    @Test func itOpensOnlyWithBothKeys() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try #"{"emitDecisions": true, "iUnderstandThisAnswersClaudeCode": true}"#
+            .write(to: url, atomically: true, encoding: .utf8)
+
+        let config = ConfigFile.load(from: url)
+        #expect(config.emitDecisions == true)
+        // Phrasing follows capability: with the gate open and a terminal to
+        // answer from, "Approve?" is a real question again.
+        #expect(config.canAcceptAnswers == true)
+        // ...but the engine's own verdicts still stay home.
+        #expect(config.autoAllow == false)
+    }
+
+    @Test func canAcceptAnswersIsDerivedNeverRead() throws {
+        // It once drifted from reality by hand. Now it cannot be set at all.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try #"{"canAcceptAnswers": true}"#.write(to: url, atomically: true, encoding: .utf8)
+
+        #expect(ConfigFile.load(from: url).canAcceptAnswers == false)
+    }
+
+    @Test func autoAllowIsReadableButInertWithTheGateShut() throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try #"{"autoAllow": true}"#.write(to: url, atomically: true, encoding: .utf8)
+
+        let config = ConfigFile.load(from: url)
+        #expect(config.autoAllow == true)
+        #expect(config.emitDecisions == false)
+    }
+
+    @Test func openingAndClosingTheGateEditsOnlyTheGateKeys() throws {
+        // `navigator gate --open` must not disturb a hand-tuned budget.
+        let before: [String: Any] = ["speechInterval": 15]
+
+        let opened = ConfigFile.gate(before, open: true)
+        #expect(opened["speechInterval"] as? Int == 15)
+        #expect(opened["emitDecisions"] as? Bool == true)
+        #expect(opened["iUnderstandThisAnswersClaudeCode"] as? Bool == true)
+
+        let closed = ConfigFile.gate(opened, open: false)
+        #expect(closed["speechInterval"] as? Int == 15)
+        #expect(closed["emitDecisions"] == nil)
+        #expect(closed["iUnderstandThisAnswersClaudeCode"] == nil)
+    }
+
+    @Test func describeSaysWhichModeItIsIn() {
+        // Narrating and acting must never be something you have to infer.
+        var open = PolicyConfig.default
+        open.emitDecisions = true
+        #expect(ConfigFile.describe(.default).contains("CLOSED"))
+        #expect(ConfigFile.describe(open).contains("OPEN"))
     }
 
     @Test func defaultBudgetIsDeliberatelyLoose() {

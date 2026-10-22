@@ -42,14 +42,15 @@ func usage() -> Never {
               [--prefix P]  where to copy them (default ~/.claude/bin)
       uninstall [--apply]   remove this tool's hooks from settings.json
       config [--write]      show the live settings; --write creates the file
+      gate [--open|--close] whether answers reach Claude Code; off by default
       learn [days]          commands the classifier did not recognise
       learn --safe a,b      mark them safe in rules.json
 
     install and uninstall print what they would do and change nothing without
     --apply. install backs settings.json up first.
 
-    The observer build never returns a decision to Claude Code. Sessions behave
-    exactly as they would with no hook installed.
+    With the gate closed (the default) nothing is ever returned to Claude Code
+    and sessions behave exactly as they would with no hook installed.
 
     """.utf8))
     exit(2)
@@ -142,7 +143,6 @@ case "run":
 
     print("navigator listening on \(socketPath)")
     print("logging to \(defaultLogDir.path)")
-    print("wire gate CLOSED — no decisions are returned to Claude Code")
     // Print the live numbers, not the compiled-in ones: the whole point of the
     // config file is that these change, and a banner showing defaults while the
     // daemon runs on something else is worse than no banner.
@@ -489,6 +489,40 @@ case "say":      sendControl(.say, argument: arguments.dropFirst(2).joined(separ
 case "approve":  sendControl(.approve)
 case "deny":     sendControl(.deny)
 case "escalate": sendControl(.escalate)
+
+case "gate":
+    // The one deliberate act in this tool. It prints what changes before it
+    // changes it, and the daemon's banner repeats the result on every start.
+    let config = ConfigFile.load(from: configPath)
+    let state = config.emitDecisions ? "OPEN" : "CLOSED"
+
+    if arguments.contains("--open") {
+        guard !config.emitDecisions else { print("gate already OPEN"); exit(0) }
+        print("""
+            Opening the wire gate in \(configPath.path).
+
+            From the next daemon start, `navigator approve` and `navigator deny`
+            answer the permission prompt of whichever session is asking, and an
+            unanswered question shows the on-screen prompt after 20 seconds.
+
+            Know what this trusts: anything that can run `navigator approve` on
+            this machine can answer a question. The session being asked cannot —
+            its tool call is blocked — but a process it started earlier, or a
+            second session, could. The gate assumes you trust what is running.
+            A nod (milestone 3) is the channel an agent cannot reach.
+
+            """)
+        try ConfigFile.writeRaw(
+            ConfigFile.gate(ConfigFile.rawContents(of: configPath), open: true), to: configPath)
+        print("gate OPEN — restart the daemon: navigator service restart")
+    } else if arguments.contains("--close") {
+        try ConfigFile.writeRaw(
+            ConfigFile.gate(ConfigFile.rawContents(of: configPath), open: false), to: configPath)
+        print("gate CLOSED — restart the daemon: navigator service restart")
+    } else {
+        print("gate \(state)  (\(configPath.path))")
+        print("open with --open, close with --close; the daemon reads it at start")
+    }
 
 case "config":
     let config = ConfigFile.load(from: configPath)
