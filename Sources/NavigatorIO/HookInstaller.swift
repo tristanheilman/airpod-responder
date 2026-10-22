@@ -11,11 +11,20 @@ public enum HookInstaller {
     /// of tool calls.
     public static let observedEvents = [
         "SessionStart", "SessionEnd", "UserPromptSubmit",
-        "PreToolUse", "PostToolUseFailure",
+        "PreToolUse", "PermissionRequest", "PostToolUseFailure",
         "Notification", "Elicitation",
         "Stop", "StopFailure", "SubagentStop",
         "TaskCompleted", "TeammateIdle",
     ]
+
+    /// The one event the daemon holds open while you decide.
+    public static let parkingEvent = "PermissionRequest"
+
+    /// Three deadlines, strictly ordered: **daemon 20 < hook 25 < Claude Code
+    /// 30**. Each is a backstop for the one before it, so a failure at any
+    /// level still releases the agent. Only the parking event gets this rope;
+    /// everywhere else a wedged daemon still costs the short timeout.
+    public static let parkingTimeoutSeconds = 30
 
     public static func configuration(
         hookPath: String, timeoutSeconds: Int
@@ -24,9 +33,14 @@ public enum HookInstaller {
         for event in observedEvents {
             // No `matcher` key: omitted means every tool, and a narrower
             // matcher would hide the routine calls the silence rate is made of.
-            hooks[event] = [["hooks": [entry(hookPath: hookPath, timeout: timeoutSeconds)]]]
+            hooks[event] = [["hooks": [entry(
+                hookPath: hookPath, timeout: timeout(for: event, default: timeoutSeconds))]]]
         }
         return ["hooks": hooks]
+    }
+
+    private static func timeout(for event: String, default timeoutSeconds: Int) -> Int {
+        event == parkingEvent ? parkingTimeoutSeconds : timeoutSeconds
     }
 
     public static func merged(
@@ -50,7 +64,8 @@ public enum HookInstaller {
                 return updated
             }
 
-            groups.append(["hooks": [entry(hookPath: hookPath, timeout: timeoutSeconds)]])
+            groups.append(["hooks": [entry(
+                hookPath: hookPath, timeout: timeout(for: event, default: timeoutSeconds))]])
             hooks[event] = groups
         }
 

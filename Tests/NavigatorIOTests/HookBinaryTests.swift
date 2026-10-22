@@ -25,14 +25,16 @@ import Testing
     /// it exits with — and a CI box mid-suite is nothing like an idle daemon.
     /// Actual latency is pinned by `EndToEnd.medianRoundTripStaysUnder...`,
     /// which measures it directly instead of inferring it from a timeout.
-    private func run(stdin: String, socket: String, deadlineMS: Int = 3000) throws -> Outcome {
+    private func run(stdin: String, socket: String, deadlineMS: Int? = 3000) throws -> Outcome {
         let process = Process()
         process.executableURL = hookURL
-        process.environment = [
+        var environment = [
             "NAVIGATOR_SOCKET": socket,
-            "NAVIGATOR_DEADLINE_MS": String(deadlineMS),
             "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin",
         ]
+        // nil leaves the override unset, so the binary's own default applies.
+        if let deadlineMS { environment["NAVIGATOR_DEADLINE_MS"] = String(deadlineMS) }
+        process.environment = environment
         let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
         process.standardInput = inPipe
         process.standardOutput = outPipe
@@ -127,5 +129,33 @@ import Testing
         #expect(result.status == 0)
         #expect(result.stdout.isEmpty)
         #expect(elapsed < 3, "hook waited \(elapsed)s on a wedged daemon")
+    }
+
+    @Test func waitsOutAQuestionByDefaultOnlyForPermissionRequest() throws {
+        // The hook's built-in deadline is 250ms — right for the silent majority,
+        // fatal for a question. PermissionRequest is the one event that parks,
+        // so it alone gets a deadline longer than the daemon's hold.
+        let path = "/tmp/navhook-\(UInt32.random(in: 0..<UInt32.max)).sock"
+        var config = PolicyConfig.default
+        config.emitDecisions = true
+        config.canAcceptAnswers = true
+        config.questionDeadline = 1
+        let server = NavigatorServer(
+            socketPath: path, log: nil, config: config,
+            microphoneIsBusy: { false },
+            startingAt: Date(timeIntervalSince1970: 1_770_000_000))
+        try server.start()
+        defer { server.stop() }
+
+        let question = """
+        {"hook_event_name":"PermissionRequest","session_id":"s1","cwd":"/p","tool_name":"Bash","tool_input":{"command":"git push --force"}}
+        """
+        let start = Date()
+        let result = try run(stdin: question, socket: path, deadlineMS: nil)
+        let elapsed = Date().timeIntervalSince(start)
+
+        #expect(result.status == 0)
+        #expect(elapsed >= 0.9, "gave up before the daemon's deadline: \(elapsed)s")
+        #expect(result.stdout.contains("escalate"), "nobody answered, so the prompt must appear")
     }
 }

@@ -32,6 +32,11 @@ func usage() -> Never {
                             suppressed; --speak also plays a test phrase
       mute / unmute         stop and start talking
 
+    answering (needs the gate open — see `gate`)
+      approve               let the tool call it just asked about run
+      deny                  refuse it
+      escalate              send it to the on-screen prompt instead
+
     setup
       install [--apply]     copy binaries to a stable prefix and register hooks
               [--prefix P]  where to copy them (default ~/.claude/bin)
@@ -481,6 +486,9 @@ case "sessions": sendControl(.status)
 case "mute":     sendControl(.mute)
 case "unmute":   sendControl(.unmute)
 case "say":      sendControl(.say, argument: arguments.dropFirst(2).joined(separator: " "))
+case "approve":  sendControl(.approve)
+case "deny":     sendControl(.deny)
+case "escalate": sendControl(.escalate)
 
 case "config":
     let config = ConfigFile.load(from: configPath)

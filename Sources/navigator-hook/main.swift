@@ -20,8 +20,6 @@ let environment = ProcessInfo.processInfo.environment
 let socketPath = environment["NAVIGATOR_SOCKET"]
     ?? (NSHomeDirectory() as NSString).appendingPathComponent(".claude/navigator.sock")
 
-let deadline = TimeInterval(environment["NAVIGATOR_DEADLINE_MS"].flatMap(Int.init) ?? 250) / 1000
-
 let input = FileHandle.standardInput.readDataToEndOfFile()
 
 guard let event = try? JSONDecoder().decode(HookEvent.self, from: input) else {
@@ -29,6 +27,15 @@ guard let event = try? JSONDecoder().decode(HookEvent.self, from: input) else {
     // does not model. Say nothing and get out of the way.
     finish(printing: nil)
 }
+
+// 250ms is the deadline for the silent majority: the daemon answers those in
+// under a millisecond, and anything slower is a daemon worth giving up on.
+// PermissionRequest is the one event the daemon deliberately holds while you
+// decide, so it alone gets a deadline longer than the daemon's own 20s hold
+// and shorter than Claude Code's 30s hook timeout. Daemon < hook < Claude Code.
+let defaultDeadlineMS = event.kind == .permissionRequest ? 25_000 : 250
+let deadline = TimeInterval(
+    environment["NAVIGATOR_DEADLINE_MS"].flatMap(Int.init) ?? defaultDeadlineMS) / 1000
 
 let request = NavigatorRequest(event: event, at: Date())
 

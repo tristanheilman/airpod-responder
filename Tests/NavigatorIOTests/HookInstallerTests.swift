@@ -25,6 +25,23 @@ import Testing
         #expect(entries.first?["command"] as? String == "/x/navigator-hook")
     }
 
+    @Test func theHookTimeoutExceedsTheAnswerDeadlineOnlyWhereItParks() throws {
+        // Claude Code kills a hook at its own timeout. Installed at 5s it would
+        // cut every question off a quarter of the way through. But only
+        // PermissionRequest parks, so only it gets the long rope: a wedged
+        // daemon must still cost every other event five seconds, not thirty.
+        let config = HookInstaller.configuration(hookPath: "/x/h", timeoutSeconds: 5)
+        let hooks = try #require(config["hooks"] as? [String: Any])
+
+        let asking = try #require(
+            (hooks["PermissionRequest"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])
+        #expect((asking.first?["timeout"] as? Int ?? 0) > 25)
+
+        let observing = try #require(
+            (hooks["PreToolUse"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])
+        #expect(observing.first?["timeout"] as? Int == 5)
+    }
+
     @Test func omitsMatcherSoEveryToolIsObserved() throws {
         let config = HookInstaller.configuration(hookPath: "/x/h", timeoutSeconds: 5)
         let hooks = try #require(config["hooks"] as? [String: Any])
