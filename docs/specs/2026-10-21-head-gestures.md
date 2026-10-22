@@ -211,6 +211,13 @@ nothing reaches the wire even with a nod, and the gate property test proves it.
 - **Voice** — answering plan Task 4 (`tell` → `Stop` block) plus
   `SFSpeechRecognizer`. Gestures cover the one-bit answers; voice carries
   content. Out of scope here so it does not gate the milestones above.
+- **A spoken code on `approve` (`navigator approve 47`)** — considered after
+  the M1 review and declined, 2026-10-21. It would close two small gaps (a
+  pre-spawned loop self-approving; a typed answer landing on the next
+  session's question) at the cost of making the fallback worse than the
+  prompt it replaces, and the nod would not use it. The typed channel stays
+  as it is; if the stale-answer window ever bites, the fix is a
+  "must already have been spoken" guard, not a code.
 - **Confirming irreversible approvals** — whether a single nod should be
   enough to approve a force push, or whether the daemon should say "Nod again
   to confirm." Decide from the milestone-2 false-positive rate, not up front.
