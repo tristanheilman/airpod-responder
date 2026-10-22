@@ -7,4 +7,4 @@ set -e
 cd "$(dirname "$0")"
 swiftc -O main.swift -o head-motion -framework CoreMotion \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Info.plist
-exec ./head-motion
+exec ./head-motion "$@"
