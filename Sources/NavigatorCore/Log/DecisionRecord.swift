@@ -60,12 +60,19 @@ public struct DecisionRecord: Sendable, Equatable, Codable {
     /// decision reviewable without writing your commands and messages to disk.
     public let detail: String?
 
+    /// How a parked question resolved, and who resolved it. Nil when nothing
+    /// was asked. `escalate` with no source means the deadline passed.
+    public let answer: Answer?
+    public let answerSource: AnswerSource?
+
     public init(
         at: Date, sessionID: String, kind: HookEventKind, toolName: String?,
         reversibility: String, route: String, tierAssigned: Tier, delivered: Tier,
         suppressedBecause: String?, permission: PermissionDecision?, reason: String,
-        detail: String? = nil
+        detail: String? = nil, answer: Answer? = nil, answerSource: AnswerSource? = nil
     ) {
+        self.answer = answer
+        self.answerSource = answerSource
         self.at = at
         self.sessionID = sessionID
         self.kind = kind
@@ -78,5 +85,15 @@ public struct DecisionRecord: Sendable, Equatable, Codable {
         self.permission = permission
         self.reason = reason
         self.detail = detail
+    }
+
+    /// The same record, with the outcome of the question it asked.
+    public func answered(_ answer: Answer?, by source: AnswerSource?) -> DecisionRecord {
+        DecisionRecord(
+            at: at, sessionID: sessionID, kind: kind, toolName: toolName,
+            reversibility: reversibility, route: route, tierAssigned: tierAssigned,
+            delivered: delivered, suppressedBecause: suppressedBecause,
+            permission: permission, reason: reason, detail: detail,
+            answer: answer, answerSource: source)
     }
 }

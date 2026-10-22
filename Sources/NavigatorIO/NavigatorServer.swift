@@ -27,6 +27,11 @@ public final class NavigatorServer: @unchecked Sendable {
     private var _transcript = Transcript()
     private var lastCatchUp: Date?
     private var count = 0
+    private var _lastRecord: DecisionRecord?
+
+    /// The one question that may be outstanding. Answers arrive on other
+    /// connections — a terminal today, a nod later — and resolve it here.
+    private let desk = QuestionDesk()
 
     private let stateLock = NSLock()
     private var listener: UnixSocket?
@@ -67,6 +72,12 @@ public final class NavigatorServer: @unchecked Sendable {
         return _transcript
     }
 
+    /// The most recent record as it was written to the log, answer included.
+    public var lastRecord: DecisionRecord? {
+        lock.lock(); defer { lock.unlock() }
+        return _lastRecord
+    }
+
     private var isRunning: Bool {
         stateLock.lock(); defer { stateLock.unlock() }
         return running
@@ -101,6 +112,12 @@ public final class NavigatorServer: @unchecked Sendable {
         stateLock.unlock()
 
         listener?.close()
+
+        // A hook parked mid-shutdown must be released, not abandoned: its own
+        // deadline would eventually free it, but "eventually" is 25 seconds of
+        // a stalled tool call for no reason.
+        desk.answerCurrent(.escalate)
+        desk.clear()
 
         // Drain both queues before returning. Records and utterances are
         // dispatched asynchronously so neither disk nor audio sits on the hook's
@@ -138,18 +155,91 @@ public final class NavigatorServer: @unchecked Sendable {
 
         lock.lock()
         let decision = engine.decide(stamped)
-        let record = engine.log.last
+        var record = engine.log.last
         let sessionName = engine.registry.session(id: stamped.event.sessionID)
             .map(Transcript.name(of:)) ?? "a session"
         count += 1
         lock.unlock()
 
-        let output = try? HookOutput.encode(
-            decision, for: stamped.event.kind, emitDecisions: config.emitDecisions)
+        let kind = stamped.event.kind
 
-        // Respond first. Neither disk nor audio sits on the hook's critical path.
-        reply(on: connection, NavigatorResponse(output: output ?? nil))
+        // A decision point stops the agent on purpose — an approval that
+        // arrives after the command ran is not an approval. Everything else
+        // still answers in under a millisecond. Only PermissionRequest parks:
+        // PreToolUse fires for the same call moments earlier, and asking twice
+        // is worse than asking once.
+        if kind == .permissionRequest, decision.blocking, config.canAcceptAnswers,
+           let utterance = decision.utterance {
+            let answer: Answer?
+            let source: AnswerSource?
 
+            if microphoneIsBusy() {
+                // The question would go unspoken. Holding the agent behind a
+                // question you cannot hear is a stall with no payoff.
+                (answer, source) = (.escalate, nil)
+            } else if desk.park(PendingQuestion(sessionName: sessionName, text: utterance)) {
+                let question = desk.current!
+                audio.async { [self] in speaker.say(utterance) }
+                answer = question.wait(timeout: config.questionDeadline)
+                source = question.answeredBy
+                desk.clear()
+                lock.lock(); engine.resolveQuestion(); lock.unlock()
+            } else {
+                // Refused rather than queued: stalling behind another agent's
+                // unanswered question is worse than showing a prompt.
+                (answer, source) = (.escalate, nil)
+            }
+
+            record = record?.answered(answer ?? .escalate, by: source)
+            reply(on: connection, NavigatorResponse(
+                output: encode(answer, for: kind, decision: decision)))
+            announce(decision, sessionName: sessionName, at: stamped.at)
+            append(record)
+            return
+        }
+
+        if kind == .permissionRequest {
+            // Not asked, so nobody answered. The prompt is the right outcome,
+            // and PermissionRequest has a word for it.
+            reply(on: connection, NavigatorResponse(
+                output: (try? HookOutput.escalation(
+                    for: kind, reason: decision.reason,
+                    emitDecisions: config.emitDecisions)) ?? nil))
+        } else {
+            let output = try? HookOutput.encode(
+                decision, for: kind,
+                emitDecisions: config.emitDecisions && config.autoAllow)
+            // Respond first. Neither disk nor audio sits on the hook's critical path.
+            reply(on: connection, NavigatorResponse(output: output ?? nil))
+        }
+
+        announce(decision, sessionName: sessionName, at: stamped.at)
+        append(record)
+    }
+
+    /// Turns an answer into wire output. **Nil means nobody answered**, and
+    /// that must never become `allow`.
+    private func encode(
+        _ answer: Answer?, for kind: HookEventKind, decision: Decision
+    ) -> String? {
+        switch answer {
+        case .approve:
+            return (try? HookOutput.encode(
+                Decision(tier: decision.tier, permission: .allow,
+                         utterance: nil, reason: decision.reason, blocking: false),
+                for: kind, emitDecisions: config.emitDecisions)) ?? nil
+        case .deny:
+            return (try? HookOutput.answeredDenial(
+                for: kind, reason: decision.reason,
+                emitDecisions: config.emitDecisions)) ?? nil
+        case .escalate, nil:
+            return (try? HookOutput.escalation(
+                for: kind, reason: decision.reason,
+                emitDecisions: config.emitDecisions)) ?? nil
+        }
+    }
+
+    private func announce(_ decision: Decision, sessionName: String, at: Date) {
         audio.async { [self] in
             // Checked per utterance rather than once at startup: whether you are
             // on a call changes minute to minute, which is the whole point.
@@ -157,7 +247,7 @@ public final class NavigatorServer: @unchecked Sendable {
             let active = onACall ? silentAnnouncer : announcer
 
             guard let utterance = active.announce(
-                decision, sessionName: sessionName, at: stamped.at) else { return }
+                decision, sessionName: sessionName, at: at) else { return }
 
             // Still recorded, but marked unheard — so catch-up can tell you what
             // happened while you were talking to someone.
@@ -169,17 +259,20 @@ public final class NavigatorServer: @unchecked Sendable {
 
             lock.lock(); _transcript.record(recorded); lock.unlock()
         }
+    }
 
-        if let log, let record {
-            logging.async {
-                do {
-                    try log.append(record, on: record.at)
-                } catch {
-                    // The log is this build's entire product. A silent failure
-                    // here would look exactly like a quiet day.
-                    FileHandle.standardError.write(
-                        Data("navigator: cannot write decision log: \(error)\n".utf8))
-                }
+    private func append(_ record: DecisionRecord?) {
+        guard let record else { return }
+        lock.lock(); _lastRecord = record; lock.unlock()
+        guard let log else { return }
+        logging.async {
+            do {
+                try log.append(record, on: record.at)
+            } catch {
+                // The log is this build's entire product. A silent failure
+                // here would look exactly like a quiet day.
+                FileHandle.standardError.write(
+                    Data("navigator: cannot write decision log: \(error)\n".utf8))
             }
         }
     }
@@ -242,6 +335,15 @@ public final class NavigatorServer: @unchecked Sendable {
             guard !text.isEmpty else { return "Nothing to say." }
             audio.async { [self] in speaker.say(text) }
             return text
+
+        case .approve, .deny, .escalate:
+            let answer: Answer = command == .approve ? .approve
+                : command == .deny ? .deny : .escalate
+            guard let text = desk.answerCurrent(answer, from: .terminal) else {
+                return "No question is waiting."
+            }
+            speaker.play(.acknowledged)
+            return "\(answer.rawValue): \(text)"
         }
     }
 }

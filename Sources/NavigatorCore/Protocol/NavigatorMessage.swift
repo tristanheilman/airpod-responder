@@ -10,6 +10,10 @@ public enum NavigatorCommand: String, Codable, Sendable, Equatable, CaseIterable
     /// Speak an arbitrary string. Exists to check the audio path without
     /// waiting for an agent to do something interesting.
     case say
+    /// Answers to the question currently parked, if there is one.
+    case approve
+    case deny
+    case escalate
 }
 
 /// One message on its way to the daemon: either a hook event or a command.

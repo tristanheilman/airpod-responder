@@ -82,6 +82,8 @@ import Testing
         let path = "/tmp/navhook-\(UInt32.random(in: 0..<UInt32.max)).sock"
         var config = PolicyConfig.default
         config.emitDecisions = true
+        // The engine's own verdict reaches the wire only behind both switches.
+        config.autoAllow = true
         let server = NavigatorServer(
             socketPath: path, log: nil, config: config,
             startingAt: Date(timeIntervalSince1970: 1_770_000_000))

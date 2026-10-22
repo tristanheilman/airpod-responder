@@ -14,6 +14,7 @@ public final class PendingQuestion: @unchecked Sendable {
     private let gate = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var given: Answer?
+    private var source: AnswerSource?
 
     public init(sessionName: String, text: String) {
         self.sessionName = sessionName
@@ -27,13 +28,20 @@ public final class PendingQuestion: @unchecked Sendable {
         return given
     }
 
+    /// Who answered, once `wait` has returned. Nil when nobody did.
+    public var answeredBy: AnswerSource? {
+        lock.lock(); defer { lock.unlock() }
+        return source
+    }
+
     /// Returns false if it was already answered — first answer wins, so a
     /// duplicate cannot turn an approval into a denial after the fact.
     @discardableResult
-    public func answer(_ answer: Answer) -> Bool {
+    public func answer(_ answer: Answer, from source: AnswerSource = .terminal) -> Bool {
         lock.lock()
         guard given == nil else { lock.unlock(); return false }
         given = answer
+        self.source = source
         lock.unlock()
         gate.signal()
         return true
@@ -63,12 +71,14 @@ public final class QuestionDesk: @unchecked Sendable {
 
     /// Answers whatever is outstanding. Returns its text, or nil if nothing was.
     @discardableResult
-    public func answerCurrent(_ answer: Answer) -> String? {
+    public func answerCurrent(
+        _ answer: Answer, from source: AnswerSource = .terminal
+    ) -> String? {
         lock.lock()
         let question = parked
         lock.unlock()
 
-        guard let question, question.answer(answer) else { return nil }
+        guard let question, question.answer(answer, from: source) else { return nil }
         return question.text
     }
 

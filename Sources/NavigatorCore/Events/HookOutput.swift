@@ -87,6 +87,16 @@ public enum HookOutput {
                 decision: "escalate", reason: reason)))
     }
 
+    /// A denial a person gave. Separate from `encode`, which refuses `deny`
+    /// because the *engine* must never produce one; an answered no is not the
+    /// engine's doing, so it gets its own path rather than a weaker guard.
+    public static func answeredDenial(
+        for kind: HookEventKind, reason: String, emitDecisions: Bool
+    ) throws -> String? {
+        guard emitDecisions else { return nil }
+        return try verdict(PermissionDecision.deny.rawValue, for: kind, reason: reason)
+    }
+
     /// Feed spoken direction back into a running conversation.
     ///
     /// This is the mechanism that makes "takes over" true: `Stop` returning

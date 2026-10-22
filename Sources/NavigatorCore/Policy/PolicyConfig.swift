@@ -48,6 +48,14 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
     /// this gets turned on with evidence rather than optimism.
     public var emitDecisions: Bool
 
+    /// Whether verdicts nobody answered may reach Claude Code.
+    ///
+    /// Opening the gate means *your answers* get through. Letting the engine
+    /// wave reversible, on-route calls past the prompt on its own is a second
+    /// decision, and it waits for a log that justifies it. Off, a day with the
+    /// gate open changes nothing you did not personally answer.
+    public var autoAllow: Bool
+
     public init(
         speechCapacity: Double = 1,
         speechInterval: TimeInterval = 60,
@@ -57,8 +65,10 @@ public struct PolicyConfig: Sendable, Equatable, Codable {
         questionDeadline: TimeInterval = 20,
         recentLogCapacity: Int = 500,
         canAcceptAnswers: Bool = false,
-        emitDecisions: Bool = false
+        emitDecisions: Bool = false,
+        autoAllow: Bool = false
     ) {
+        self.autoAllow = autoAllow
         self.speechCapacity = speechCapacity
         self.speechInterval = speechInterval
         self.failureWindow = failureWindow
