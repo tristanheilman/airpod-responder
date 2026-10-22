@@ -86,6 +86,19 @@ import Testing
         #expect(why.contains("navigator"))
     }
 
+    @Test(arguments: [
+        "env navigator approve", "env FOO=1 rm -rf build", "nohup rm -rf build",
+        "nice -n 5 git push --force", "command rm -rf build",
+    ])
+    func aWrapperDoesNotLaunderTheCommandItRuns(_ command: String) {
+        // `env` was on the safe list, so `env rm -rf` classified as safe and
+        // went silent. A wrapper runs whatever follows it; the thing that
+        // follows is what gets classified.
+        guard case .irreversible = bash(command) else {
+            Issue.record("laundered: \(command) → \(bash(command))"); return
+        }
+    }
+
     @Test func unrecognisedCommandIsUnknown() {
         guard case .unknown = bash("frobnicate --widget 3") else {
             Issue.record("expected unknown")

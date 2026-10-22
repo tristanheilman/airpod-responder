@@ -139,7 +139,7 @@ public enum BashRules {
         BashRule("uname", reason: ""), BashRule("date", reason: ""),
         BashRule("shasum", reason: ""), BashRule("stat", reason: ""),
         BashRule("realpath", reason: ""), BashRule("readlink", reason: ""),
-        BashRule("env", reason: ""), BashRule("seq", reason: ""),
+        BashRule("seq", reason: ""),
         BashRule("tr", reason: ""), BashRule("cut", reason: ""),
         BashRule("du", reason: ""), BashRule("df", reason: ""),
         BashRule("ps", reason: ""), BashRule("file", reason: ""),

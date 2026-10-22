@@ -389,16 +389,27 @@ public struct ReversibilityClassifier: Sendable {
     }
 
     /// Strips leading shell structure so the real program is at index 0.
+    /// Programs that run whatever follows them. `env rm -rf` is `rm -rf`,
+    /// and with `env` once on the safe list it classified as safe and went
+    /// silent — a hole in front of every rule in the table, not just one.
+    private static let wrappers: Set<String> = ["env", "nohup", "nice", "command", "xargs"]
+
     static func effectiveTokens(_ tokens: [String]) -> [String] {
         var remaining = tokens
 
         while let first = remaining.first {
-            if shellKeywords.contains(first) {
+            if shellKeywords.contains(first) || isEnvironmentAssignment(first) {
                 remaining.removeFirst()
                 continue
             }
-            if isEnvironmentAssignment(first) {
+            if wrappers.contains(first) {
                 remaining.removeFirst()
+                // A wrapper's own options (`nice -n 5`, `env -i`) are not the
+                // program either. A flag's argument is skipped with it.
+                while let option = remaining.first, option.hasPrefix("-") {
+                    remaining.removeFirst()
+                    if (option == "-n" || option == "-u"), !remaining.isEmpty { remaining.removeFirst() }
+                }
                 continue
             }
             break
