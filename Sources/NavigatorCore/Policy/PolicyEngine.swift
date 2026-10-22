@@ -189,7 +189,7 @@ public struct PolicyEngine: Sendable {
         return ReversibilityClassifier.segments(of: command)
             .lazy
             .compactMap { ReversibilityClassifier.effectiveTokens(
-                ReversibilityClassifier.tokenize($0)).first }
+                ReversibilityClassifier.tokenize($0)).tokens.first }
             .first
     }
 

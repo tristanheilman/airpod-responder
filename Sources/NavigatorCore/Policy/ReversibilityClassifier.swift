@@ -110,16 +110,24 @@ public struct ReversibilityClassifier: Sendable {
             return verdict
         }
 
-        let tokens = Self.effectiveTokens(rawTokens)
+        let (tokens, wrapper) = Self.effectiveTokens(rawTokens)
         // Nothing left means the segment was pure shell structure — a bare
         // `fi`, or `FOO=bar` on its own. Structure does nothing by itself.
+        // A bare `env` prints the environment and a bare `nice` does nothing;
+        // a bare `xargs` runs whatever stdin says.
         guard !tokens.isEmpty else {
+            if wrapper == "xargs" { return .unknown(reason: "bare xargs") }
             return innerUnknown.map { .unknown(reason: $0) } ?? .reversible
         }
 
         for rule in irreversibleCommands where rule.matches(tokens: tokens) {
             return .irreversible(reason: rule.reason)
         }
+        // A wrapper's option grammar is only half modelled, and xargs takes
+        // its argv from stdin, which cannot be seen at all. So a wrapped
+        // segment may escalate — the program it exposes is what it is — but
+        // never vouch: `xargs -I echo rm -rf x` must not resolve to `echo`.
+        if let wrapper { return .unknown(reason: "wrapped by \(wrapper)") }
         for rule in safeCommands where rule.matches(tokens: tokens) {
             // A safe outer command does not vouch for an unrecognised inner one.
             return innerUnknown.map { .unknown(reason: $0) } ?? .reversible
@@ -217,7 +225,7 @@ public struct ReversibilityClassifier: Sendable {
 
             guard let delimiter = heredocDelimiter(in: line) else { continue }
 
-            let firstWord = effectiveTokens(tokenize(line)).first ?? ""
+            let firstWord = effectiveTokens(tokenize(line)).tokens.first ?? ""
             if shellInterpreters.contains(firstWord) { continue }
 
             while index < lines.count,
@@ -394,8 +402,12 @@ public struct ReversibilityClassifier: Sendable {
     /// silent — a hole in front of every rule in the table, not just one.
     private static let wrappers: Set<String> = ["env", "nohup", "nice", "command", "xargs"]
 
-    static func effectiveTokens(_ tokens: [String]) -> [String] {
+    /// The tokens with shell structure and wrappers stripped, and the first
+    /// wrapper stripped if any — the caller must not treat a wrapped
+    /// program's safe verdict as its own.
+    static func effectiveTokens(_ tokens: [String]) -> (tokens: [String], wrapper: String?) {
         var remaining = tokens
+        var wrapper: String?
 
         while let first = remaining.first {
             if shellKeywords.contains(first) || isEnvironmentAssignment(first) {
@@ -403,6 +415,7 @@ public struct ReversibilityClassifier: Sendable {
                 continue
             }
             if wrappers.contains(first) {
+                wrapper = wrapper ?? first
                 remaining.removeFirst()
                 // A wrapper's own options (`nice -n 5`, `env -i`) are not the
                 // program either. A flag's argument is skipped with it.
@@ -415,7 +428,7 @@ public struct ReversibilityClassifier: Sendable {
             break
         }
 
-        return remaining
+        return (remaining, wrapper)
     }
 
     /// `FOO=bar cmd` — the assignment is a prefix, not the command.

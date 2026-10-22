@@ -99,6 +99,20 @@ import Testing
         }
     }
 
+    @Test(arguments: [
+        "xargs -I echo rm -rf x", "env -C dir ls", "nohup ls", "xargs", "xargs rm",
+    ])
+    func aWrapperCanEscalateButNeverVouch(_ command: String) {
+        // A wrapper's full option grammar is not modelled, and xargs takes
+        // its argv from stdin, which cannot be seen at all. Half-parsing the
+        // options let `xargs -I echo rm -rf x` classify as `echo`: safe,
+        // silent. So a wrapped segment resolves to irreversible if the
+        // program it exposes is, and to unknown otherwise — never to safe.
+        if case .reversible = bash(command) {
+            Issue.record("vouched for: \(command)")
+        }
+    }
+
     @Test func unrecognisedCommandIsUnknown() {
         guard case .unknown = bash("frobnicate --widget 3") else {
             Issue.record("expected unknown")
