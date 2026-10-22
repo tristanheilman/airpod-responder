@@ -131,6 +131,31 @@ import Testing
         #expect(elapsed < 3, "hook waited \(elapsed)s on a wedged daemon")
     }
 
+    @Test func aLeftoverDeadlineOverrideCannotStopParking() throws {
+        // NAVIGATOR_DEADLINE_MS tunes the 250ms the silent majority gets. A
+        // stray 200 left in a launchd plist from testing must not quietly
+        // turn every question into an instant escalation.
+        let path = "/tmp/navhook-\(UInt32.random(in: 0..<UInt32.max)).sock"
+        var config = PolicyConfig.default
+        config.emitDecisions = true
+        config.canAcceptAnswers = true
+        config.questionDeadline = 1
+        let server = NavigatorServer(
+            socketPath: path, log: nil, config: config,
+            microphoneIsBusy: { false },
+            startingAt: Date(timeIntervalSince1970: 1_770_000_000))
+        try server.start()
+        defer { server.stop() }
+
+        let question = """
+        {"hook_event_name":"PermissionRequest","session_id":"s1","cwd":"/p","tool_name":"Bash","tool_input":{"command":"git push --force"}}
+        """
+        let start = Date()
+        let result = try run(stdin: question, socket: path, deadlineMS: 200)
+        #expect(result.status == 0)
+        #expect(Date().timeIntervalSince(start) >= 0.9, "the override shortened the hold")
+    }
+
     @Test func waitsOutAQuestionByDefaultOnlyForPermissionRequest() throws {
         // The hook's built-in deadline is 250ms — right for the silent majority,
         // fatal for a question. PermissionRequest is the one event that parks,

@@ -117,6 +117,24 @@ import Testing
         #expect(closed["iUnderstandThisAnswersClaudeCode"] == nil)
     }
 
+    @Test func rewritingTheFileKeepsAnOpenGateOpen() throws {
+        // `navigator config --write` rewrites the file to tune a number. It
+        // must not quietly close a gate that was opened on purpose, and must
+        // not write keys that load never reads.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try ConfigFile.writeRaw(ConfigFile.gate(["speechInterval": 15], open: true), to: url)
+
+        var config = ConfigFile.load(from: url)
+        config.speechInterval = 30
+        try ConfigFile.write(config, to: url)
+
+        let back = ConfigFile.load(from: url)
+        #expect(back.emitDecisions == true)
+        #expect(back.speechInterval == 30)
+        #expect(ConfigFile.rawContents(of: url)["canAcceptAnswers"] == nil)
+    }
+
     @Test func describeSaysWhichModeItIsIn() {
         // Narrating and acting must never be something you have to infer.
         var open = PolicyConfig.default

@@ -267,6 +267,40 @@ import Testing
         #expect(done.wait(timeout: .now() + 8) == .success, "the hook was abandoned")
     }
 
+    @Test func aShutdownReleaseIsLoggedAsNobodyAnswering() throws {
+        // The log exists to count how often nobody answered. A release at
+        // shutdown is not the terminal answering, and the record of it must
+        // reach the log rather than be dropped behind the drain.
+        let path = tempPath()
+        let server = try makeServer(path, open: true)
+
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            _ = try? self.send(path, self.force(at: Date()))
+            done.signal()
+        }
+        Thread.sleep(forTimeInterval: 0.4)
+        server.stop()
+        #expect(done.wait(timeout: .now() + 8) == .success)
+
+        let record = try #require(server.lastRecord)
+        #expect(record.answer == .escalate)
+        #expect(record.answerSource == nil)
+    }
+
+    @Test func aRefusedQuestionDoesNotPoisonTheNextOne() throws {
+        // Mic busy: not parked, answered at once. The engine must not go on
+        // believing a question is in flight for the next twenty seconds.
+        let path = tempPath()
+        let server = try makeServer(path, open: true, onACall: true)
+        defer { server.stop() }
+
+        _ = try send(path, force(at: Date()))
+        _ = try send(path, force(at: Date()))
+        let record = try #require(server.lastRecord)
+        #expect(!record.reason.contains("in flight"), "reason: \(record.reason)")
+    }
+
     @Test func theAnswerAndItsSourceAreLogged() throws {
         // The number that matters later is how often a nod answered versus how
         // often nobody did. That only exists if the record says who answered.

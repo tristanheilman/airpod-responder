@@ -33,9 +33,13 @@ guard let event = try? JSONDecoder().decode(HookEvent.self, from: input) else {
 // PermissionRequest is the one event the daemon deliberately holds while you
 // decide, so it alone gets a deadline longer than the daemon's own 20s hold
 // and shorter than Claude Code's 30s hook timeout. Daemon < hook < Claude Code.
-let defaultDeadlineMS = event.kind == .permissionRequest ? 25_000 : 250
-let deadline = TimeInterval(
-    environment["NAVIGATOR_DEADLINE_MS"].flatMap(Int.init) ?? defaultDeadlineMS) / 1000
+// Two overrides, because they tune different things: a stray short
+// NAVIGATOR_DEADLINE_MS left over from testing must not turn every question
+// into an instant escalation.
+let deadlineMS: Int = event.kind == .permissionRequest
+    ? environment["NAVIGATOR_QUESTION_DEADLINE_MS"].flatMap(Int.init) ?? 25_000
+    : environment["NAVIGATOR_DEADLINE_MS"].flatMap(Int.init) ?? 250
+let deadline = TimeInterval(deadlineMS) / 1000
 
 let request = NavigatorRequest(event: event, at: Date())
 

@@ -43,8 +43,10 @@ public final class PendingQuestion: @unchecked Sendable {
 
     /// Returns false if it was already answered — first answer wins, so a
     /// duplicate cannot turn an approval into a denial after the fact.
+    /// A nil source means nobody answered — a shutdown release, for instance —
+    /// and is what the log counts as "unanswered".
     @discardableResult
-    public func answer(_ answer: Answer, from source: AnswerSource = .terminal) -> Bool {
+    public func answer(_ answer: Answer, from source: AnswerSource? = .terminal) -> Bool {
         lock.lock()
         guard given == nil, !closed else { lock.unlock(); return false }
         given = answer
@@ -79,7 +81,7 @@ public final class QuestionDesk: @unchecked Sendable {
     /// Answers whatever is outstanding. Returns its text, or nil if nothing was.
     @discardableResult
     public func answerCurrent(
-        _ answer: Answer, from source: AnswerSource = .terminal
+        _ answer: Answer, from source: AnswerSource? = .terminal
     ) -> String? {
         lock.lock()
         let question = parked

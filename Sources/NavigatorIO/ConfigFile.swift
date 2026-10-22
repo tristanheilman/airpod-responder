@@ -64,12 +64,22 @@ public enum ConfigFile {
             withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]).write(to: url)
     }
 
+    /// Writes the tunable numbers over whatever the file already holds.
+    ///
+    /// Merged, not replaced: the gate keys live in the raw file and are not
+    /// fields on the struct, so an encode-the-struct write would silently
+    /// close a gate that was opened on purpose. The derived and gate fields
+    /// are never written — `load` never reads them, and a file that shows
+    /// `emitDecisions: true` beside a closed gate would be a lie.
     public static func write(_ config: PolicyConfig, to url: URL) throws {
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(config).write(to: url)
+        var raw = rawContents(of: url)
+        raw["speechCapacity"] = config.speechCapacity
+        raw["speechInterval"] = config.speechInterval
+        raw["failureWindow"] = config.failureWindow
+        raw["thrashRepeatThreshold"] = config.thrashRepeatThreshold
+        raw["thrashMinimumDuration"] = config.thrashMinimumDuration
+        raw["autoAllow"] = config.autoAllow
+        try writeRaw(raw, to: url)
     }
 
     public static func describe(_ config: PolicyConfig) -> String {

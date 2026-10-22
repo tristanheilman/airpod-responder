@@ -32,6 +32,8 @@ public final class NavigatorServer: @unchecked Sendable {
     /// The one question that may be outstanding. Answers arrive on other
     /// connections — a terminal today, a nod later — and resolve it here.
     private let desk = QuestionDesk()
+    /// Workers currently holding a hook open, so stop() can wait for them.
+    private let parked = DispatchGroup()
 
     /// PreToolUse heads-ups waiting to see whether a PermissionRequest for the
     /// same session follows. Keyed by session; the token tells a delayed
@@ -125,9 +127,13 @@ public final class NavigatorServer: @unchecked Sendable {
 
         // A hook parked mid-shutdown must be released, not abandoned: its own
         // deadline would eventually free it, but "eventually" is 25 seconds of
-        // a stalled tool call for no reason.
-        desk.answerCurrent(.escalate)
+        // a stalled tool call for no reason. No source: nobody answered.
+        desk.answerCurrent(.escalate, from: nil)
         desk.clear()
+        // The released worker still has to write its record. Draining the log
+        // queue before it gets there would drop the one line that says the
+        // question went unanswered.
+        parked.wait()
 
         // Drain both queues before returning. Records and utterances are
         // dispatched asynchronously so neither disk nor audio sits on the hook's
@@ -188,6 +194,7 @@ public final class NavigatorServer: @unchecked Sendable {
            let utterance = decision.utterance {
             let answer: Answer?
             let source: AnswerSource?
+            var held = false
 
             if microphoneIsBusy() {
                 // The question would go unspoken. Holding the agent behind a
@@ -195,16 +202,21 @@ public final class NavigatorServer: @unchecked Sendable {
                 (answer, source) = (.escalate, nil)
             } else if case let question = PendingQuestion(sessionName: sessionName, text: utterance),
                       desk.park(question) {
+                parked.enter(); held = true
                 audio.async { [self] in speaker.say(utterance) }
                 answer = question.wait(timeout: config.questionDeadline)
                 source = question.answeredBy
                 desk.clear()
-                lock.lock(); engine.resolveQuestion(); lock.unlock()
             } else {
                 // Refused rather than queued: stalling behind another agent's
                 // unanswered question is worse than showing a prompt.
                 (answer, source) = (.escalate, nil)
             }
+
+            // On every exit, not just the parked one: a question that was
+            // never held must not leave the engine believing one is in
+            // flight for the next twenty seconds.
+            lock.lock(); engine.resolveQuestion(); lock.unlock()
 
             record = record?.answered(answer ?? .escalate, by: source)
             reply(on: connection, NavigatorResponse(
@@ -220,6 +232,7 @@ public final class NavigatorServer: @unchecked Sendable {
                 tier: decision.tier, wasSpoken: source != nil || answer == nil))
             lock.unlock()
             append(record)
+            if held { parked.leave() }
             return
         }
 
