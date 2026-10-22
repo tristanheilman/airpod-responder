@@ -117,3 +117,64 @@ import Testing
         #expect(PolicyConfig.default.emitDecisions == false)
     }
 }
+
+@Suite struct WireGateCoversEveryOutboundPath {
+    /// The gate was checked exhaustively when PreToolUse was the only way out.
+    /// Three new ones are being added; the guarantee has to grow with them.
+    @Test func closedGateBlocksEscalation() throws {
+        #expect(try HookOutput.escalation(
+            for: .permissionRequest, reason: "r", emitDecisions: false) == nil)
+    }
+
+    @Test func closedGateBlocksInstructions() throws {
+        #expect(try HookOutput.instruction(
+            "add tests", for: .stop, emitDecisions: false) == nil)
+    }
+
+    @Test func openGateEmitsEscalation() throws {
+        let out = try #require(try HookOutput.escalation(
+            for: .permissionRequest, reason: "force push", emitDecisions: true))
+        let parsed = try JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any]
+        let specific = try #require(parsed?["hookSpecificOutput"] as? [String: Any])
+
+        #expect(specific["hookEventName"] as? String == "PermissionRequest")
+        #expect(specific["decision"] as? String == "escalate")
+    }
+
+    @Test func openGateEmitsAnInstruction() throws {
+        let out = try #require(try HookOutput.instruction(
+            "add tests for the parser", for: .stop, emitDecisions: true))
+        let parsed = try JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any]
+
+        // Stop uses a top-level decision, not hookSpecificOutput.
+        #expect(parsed?["decision"] as? String == "block")
+        #expect((parsed?["reason"] as? String)?.contains("add tests") == true)
+    }
+
+    @Test func permissionRequestUsesDecisionNotPermissionDecision() throws {
+        // PreToolUse spells it `permissionDecision`; PermissionRequest spells it
+        // `decision`. Getting this wrong fails silently — the hook returns
+        // valid JSON that Claude Code ignores.
+        let allow = Decision(tier: .silent, permission: .allow,
+                             utterance: nil, reason: "ok", blocking: false)
+        let out = try #require(try HookOutput.encode(
+            allow, for: .permissionRequest, emitDecisions: true))
+        let parsed = try JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any]
+        let specific = try #require(parsed?["hookSpecificOutput"] as? [String: Any])
+
+        #expect(specific["decision"] as? String == "allow")
+        #expect(specific["permissionDecision"] == nil)
+    }
+
+    @Test func everyNewPathIsShutWithTheGateClosed() throws {
+        for kind in HookEventKind.allCases {
+            for permission: PermissionDecision? in [nil, .allow, .defer, .deny] {
+                let decision = Decision(
+                    tier: .decisionPoint, permission: permission,
+                    utterance: "x", reason: "r", blocking: true)
+                #expect(try HookOutput.encode(
+                    decision, for: kind, emitDecisions: false) == nil)
+            }
+        }
+    }
+}

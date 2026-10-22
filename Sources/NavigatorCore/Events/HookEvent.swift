@@ -5,6 +5,10 @@ public enum HookEventKind: String, Codable, Sendable, CaseIterable {
     case sessionEnd = "SessionEnd"
     case userPromptSubmit = "UserPromptSubmit"
     case preToolUse = "PreToolUse"
+    /// Fires only when a call genuinely needs a decision, between PreToolUse
+    /// and the tool running. The one event with an explicit "show the
+    /// prompt" answer (`escalate`), which is why questions park here.
+    case permissionRequest = "PermissionRequest"
     case postToolUseFailure = "PostToolUseFailure"
     case notification = "Notification"
     case stop = "Stop"

@@ -17,7 +17,7 @@ public struct TierAssigner: Sendable {
         notificationType: String?
     ) -> TierVerdict {
         switch kind {
-        case .preToolUse:
+        case .preToolUse, .permissionRequest:
             return assignToolCall(reversibility: reversibility, route: route)
 
         case .notification:
