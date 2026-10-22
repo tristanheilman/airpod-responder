@@ -66,4 +66,13 @@ import Testing
         let desk = QuestionDesk()
         #expect(desk.answerCurrent(.approve) == nil)
     }
+
+    @Test func aLateAnswerIsRefusedOnceTheWaitHasReturned() {
+        // The hook has already been told "escalate". An approve landing now
+        // would be reported as accepted while the prompt is on screen — or
+        // worse, be held for the next question that parks.
+        let question = PendingQuestion(sessionName: "app", text: "?")
+        #expect(question.wait(timeout: 0.1) == nil)
+        #expect(!question.answer(.approve), "answered a question nobody is waiting on")
+    }
 }

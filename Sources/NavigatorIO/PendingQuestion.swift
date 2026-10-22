@@ -15,6 +15,7 @@ public final class PendingQuestion: @unchecked Sendable {
     private let lock = NSLock()
     private var given: Answer?
     private var source: AnswerSource?
+    private var closed = false
 
     public init(sessionName: String, text: String) {
         self.sessionName = sessionName
@@ -22,9 +23,15 @@ public final class PendingQuestion: @unchecked Sendable {
     }
 
     /// Blocks until answered or the deadline passes. Nil means nobody answered.
+    ///
+    /// Once this returns the question is closed for good: the hook has been
+    /// told the outcome, and an answer landing afterwards must be refused
+    /// rather than reported as accepted — or, worse, held for the next
+    /// question to park.
     public func wait(timeout: TimeInterval) -> Answer? {
         _ = gate.wait(timeout: .now() + timeout)
         lock.lock(); defer { lock.unlock() }
+        closed = true
         return given
     }
 
@@ -39,7 +46,7 @@ public final class PendingQuestion: @unchecked Sendable {
     @discardableResult
     public func answer(_ answer: Answer, from source: AnswerSource = .terminal) -> Bool {
         lock.lock()
-        guard given == nil else { lock.unlock(); return false }
+        guard given == nil, !closed else { lock.unlock(); return false }
         given = answer
         self.source = source
         lock.unlock()
