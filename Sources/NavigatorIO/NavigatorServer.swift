@@ -198,20 +198,12 @@ public final class NavigatorServer: @unchecked Sendable {
             return
         }
 
-        if kind == .permissionRequest {
-            // Not asked, so nobody answered. The prompt is the right outcome,
-            // and PermissionRequest has a word for it.
-            reply(on: connection, NavigatorResponse(
-                output: (try? HookOutput.escalation(
-                    for: kind, reason: decision.reason,
-                    emitDecisions: config.emitDecisions)) ?? nil))
-        } else {
-            let output = try? HookOutput.encode(
-                decision, for: kind,
-                emitDecisions: config.emitDecisions && config.autoAllow)
-            // Respond first. Neither disk nor audio sits on the hook's critical path.
-            reply(on: connection, NavigatorResponse(output: output ?? nil))
-        }
+        // Respond first. Neither disk nor audio sits on the hook's critical path.
+        // The engine's own allow needs both switches; everything else is nil,
+        // which on PermissionRequest means the prompt appears.
+        let output = try? HookOutput.encode(
+            decision, for: kind, emitDecisions: config.emitDecisions && config.autoAllow)
+        reply(on: connection, NavigatorResponse(output: output ?? nil))
 
         announce(decision, sessionName: sessionName, at: stamped.at)
         append(record)
@@ -233,9 +225,9 @@ public final class NavigatorServer: @unchecked Sendable {
                 for: kind, reason: decision.reason,
                 emitDecisions: config.emitDecisions)) ?? nil
         case .escalate, nil:
-            return (try? HookOutput.escalation(
-                for: kind, reason: decision.reason,
-                emitDecisions: config.emitDecisions)) ?? nil
+            // Silence is the escalation: nothing printed, prompt shown. There
+            // is no wire value for it on any event.
+            return nil
         }
     }
 

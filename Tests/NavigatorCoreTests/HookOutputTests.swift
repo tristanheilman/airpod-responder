@@ -120,25 +120,15 @@ import Testing
 
 @Suite struct WireGateCoversEveryOutboundPath {
     /// The gate was checked exhaustively when PreToolUse was the only way out.
-    /// Three new ones are being added; the guarantee has to grow with them.
-    @Test func closedGateBlocksEscalation() throws {
-        #expect(try HookOutput.escalation(
+    /// New ones are being added; the guarantee has to grow with them.
+    @Test func closedGateBlocksAnsweredDenials() throws {
+        #expect(try HookOutput.answeredDenial(
             for: .permissionRequest, reason: "r", emitDecisions: false) == nil)
     }
 
     @Test func closedGateBlocksInstructions() throws {
         #expect(try HookOutput.instruction(
             "add tests", for: .stop, emitDecisions: false) == nil)
-    }
-
-    @Test func openGateEmitsEscalation() throws {
-        let out = try #require(try HookOutput.escalation(
-            for: .permissionRequest, reason: "force push", emitDecisions: true))
-        let parsed = try JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any]
-        let specific = try #require(parsed?["hookSpecificOutput"] as? [String: Any])
-
-        #expect(specific["hookEventName"] as? String == "PermissionRequest")
-        #expect(specific["decision"] as? String == "escalate")
     }
 
     @Test func openGateEmitsAnInstruction() throws {
@@ -151,19 +141,44 @@ import Testing
         #expect((parsed?["reason"] as? String)?.contains("add tests") == true)
     }
 
-    @Test func permissionRequestUsesDecisionNotPermissionDecision() throws {
-        // PreToolUse spells it `permissionDecision`; PermissionRequest spells it
-        // `decision`. Getting this wrong fails silently — the hook returns
-        // valid JSON that Claude Code ignores.
+    @Test func permissionRequestSpellsItsVerdictAsBehavior() throws {
+        // PreToolUse: `"permissionDecision":"allow"`. PermissionRequest:
+        // `"decision":{"behavior":"allow"}`. Verified against the installed
+        // Claude Code binary (2.1.282), whose validator says exactly:
+        //   PermissionRequest decision must be {"behavior": "allow"} or
+        //   {"behavior": "deny", "message": "..."}
+        // The wrong shape is valid JSON that Claude Code rejects with a hook
+        // error — which is how the first version of this shipped broken.
         let allow = Decision(tier: .silent, permission: .allow,
                              utterance: nil, reason: "ok", blocking: false)
         let out = try #require(try HookOutput.encode(
             allow, for: .permissionRequest, emitDecisions: true))
         let parsed = try JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any]
         let specific = try #require(parsed?["hookSpecificOutput"] as? [String: Any])
+        let decision = try #require(specific["decision"] as? [String: Any])
 
-        #expect(specific["decision"] as? String == "allow")
+        #expect(specific["hookEventName"] as? String == "PermissionRequest")
+        #expect(decision["behavior"] as? String == "allow")
         #expect(specific["permissionDecision"] == nil)
+    }
+
+    @Test func anAnsweredDenialCarriesItsMessage() throws {
+        let out = try #require(try HookOutput.answeredDenial(
+            for: .permissionRequest, reason: "you said no", emitDecisions: true))
+        let parsed = try JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any]
+        let specific = try #require(parsed?["hookSpecificOutput"] as? [String: Any])
+        let decision = try #require(specific["decision"] as? [String: Any])
+
+        #expect(decision["behavior"] as? String == "deny")
+        #expect(decision["message"] as? String == "you said no")
+    }
+
+    @Test func anAnsweredDenialOnPreToolUseUsesThatEventsSpelling() throws {
+        let out = try #require(try HookOutput.answeredDenial(
+            for: .preToolUse, reason: "no", emitDecisions: true))
+        let parsed = try JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any]
+        let specific = try #require(parsed?["hookSpecificOutput"] as? [String: Any])
+        #expect(specific["permissionDecision"] as? String == "deny")
     }
 
     @Test func everyNewPathIsShutWithTheGateClosed() throws {
@@ -175,6 +190,8 @@ import Testing
                 #expect(try HookOutput.encode(
                     decision, for: kind, emitDecisions: false) == nil)
             }
+            #expect(try HookOutput.answeredDenial(
+                for: kind, reason: "r", emitDecisions: false) == nil)
         }
     }
 }

@@ -78,8 +78,8 @@ import Testing
         #expect(waited >= 2.5, "did not actually wait: \(waited)s")
         #expect(waited < 8, "waited too long: \(waited)s")
         #expect(response.output?.contains("allow") != true, "an unanswered question allowed it")
-        // PermissionRequest has a word for "show the prompt". Use it.
-        #expect(response.output?.contains("escalate") == true)
+        // Silence is the escalation: nothing printed, the prompt appears.
+        #expect(response.output == nil)
     }
 
     @Test func aDenialIsAnAnswerNotAnAutoDeny() throws {
@@ -118,7 +118,9 @@ import Testing
         // PreToolUse fires for the same call just before PermissionRequest.
         // Parking both would ask the same question twice; and a timed-out
         // PreToolUse can only fall silent, where PermissionRequest can say
-        // "escalate". So the question lives on PermissionRequest alone.
+        // say nothing — same thing. The question lives on PermissionRequest
+        // alone because it is the event that fires only when a decision is
+        // genuinely needed.
         let path = tempPath()
         let server = try makeServer(path, open: true)
         defer { server.stop() }
@@ -170,7 +172,7 @@ import Testing
         let response = try send(path, force(at: Date()))
 
         #expect(Date().timeIntervalSince(start) < 1, "parked during a call")
-        #expect(response.output?.contains("escalate") == true)
+        #expect(response.output == nil)
     }
 
     @Test func aSecondQuestionIsRefusedNotQueued() throws {
@@ -184,7 +186,7 @@ import Testing
         let start = Date()
         let second = try send(path, force(at: Date()))
         #expect(Date().timeIntervalSince(start) < 1, "the second one queued behind the first")
-        #expect(second.output?.contains("escalate") == true)
+        #expect(second.output == nil)
     }
 
     @Test func answeringNothingIsGraceful() throws {

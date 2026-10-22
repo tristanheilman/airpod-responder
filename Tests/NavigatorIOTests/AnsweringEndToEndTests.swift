@@ -83,7 +83,7 @@ import Testing
 
         #expect(result.status == 0)
         #expect(result.stdout.contains("\"hookEventName\":\"PermissionRequest\""))
-        #expect(result.stdout.contains("\"decision\":\"allow\""))
+        #expect(result.stdout.contains("\"decision\":{\"behavior\":\"allow\"}"))
 
         var records: [DecisionRecord] = []
         for _ in 0..<50 {
