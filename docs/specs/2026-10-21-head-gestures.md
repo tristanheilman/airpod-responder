@@ -37,8 +37,12 @@ is stated and reasoned below rather than silently replaced.
 - **The hook exits 0 on every path**, including being made to wait and then
   having the daemon die under it.
 - **Every parked question releases.** Three independent deadlines
-  (daemon < hook < Claude Code's `timeout`). Unanswered resolves to
-  `escalate` — the on-screen prompt — never to `allow`.
+  (daemon < hook < Claude Code's `timeout`). Unanswered resolves to silence
+  — nothing printed, the on-screen prompt appears — never to `allow`.
+  (Correction, 2026-10-21: the August design and the first draft of this
+  roadmap assumed a `PermissionRequest` `escalate` value. It does not exist;
+  the installed Claude Code validates only `decision: {behavior: allow}` and
+  `{behavior: deny, message}`. Silence is the escalation.)
 - **One question in flight.** A second is escalated immediately, not queued.
 - **Mute, mic-in-use and disconnected AirPods all mean "do not act."** A nod
   during a call does nothing; the question escalates at its deadline exactly
@@ -71,28 +75,29 @@ entitlement; no app bundle.
 ### 1b. Answering plan, Tasks 1, 2, 3, 5, 6, 7 — with two departures
 
 - **Park on `PermissionRequest`, not `PreToolUse`.** The plan parks
-  `PreToolUse`. Now that `PermissionRequest` is being handled in the same
-  milestone, parking both would ask you the same question twice for one tool
-  call, and a timed-out `PreToolUse` has no way to say "show the prompt" except
-  silence. `PermissionRequest` has `escalate`, which says exactly that.
-  `PreToolUse` stays an instant observer: it announces, logs, and returns
-  nothing. Cost: in `auto` mode nothing needs permission, so nothing is asked —
-  that is the mode's contract, and the heads-up announcement still fires.
+  `PreToolUse`. Claude Code fires `PreToolUse` and then `PermissionRequest`,
+  milliseconds apart, for one call; parking both would ask the same question
+  twice, and `PermissionRequest` is the event that fires only when a decision
+  is genuinely needed. `PreToolUse` stays an instant observer: it returns
+  nothing, and its heads-up is held half a second and dropped when the
+  question follows — but still speaks in `auto` mode, where nothing needs
+  permission and it is the only warning there is.
 - **Task 4 (`tell` via `Stop` block) is deferred to the voice milestone.** A
   nod cannot carry an instruction, and the two gesture milestones do not need
   it. It stays in the plan unchanged.
 
 Concretely:
 
-- `HookEventKind.permissionRequest`; `HookOutput.escalation`; `encode` spells
-  `decision` (not `permissionDecision`) for this kind. Gate test extended.
+- `HookEventKind.permissionRequest`; `encode` spells it
+  `decision: {behavior: ...}` (not `permissionDecision`) for this kind; an
+  answered `deny` carries its `message`. Gate test extended.
 - `ParkedQuestion` in `NavigatorCore`: id, session, event, parked-at, deadline.
   `Answer { verdict: allow|deny, source: terminal|gesture|voice, at }`.
   `DecisionRecord` gains `answer` and `answerSource`, so the log can later say
   how often a nod was the answer and how often it timed out.
 - `NavigatorServer`: a `PermissionRequest` decision point holds its connection
   open on the worker thread, waits on a condition for an answer, and replies
-  with allow/deny/escalate. `NavigatorCommand.approve` / `.deny` arrive on a
+  with allow, deny, or nothing. `NavigatorCommand.approve` / `.deny` arrive on a
   separate connection and resolve it. Deadline `questionDeadline` (20 s).
 - Hook: `NAVIGATOR_DEADLINE_MS` default stays 250 for every event kind except
   `PermissionRequest`, which uses 25 000. The installer writes `timeout: 30`
@@ -102,11 +107,13 @@ Concretely:
   capability again.
 - Opening the gate: `emitDecisions: true` in `config.json` is honoured only
   when a second key, `iUnderstandThisAnswersClaudeCode: true`, is also set,
-  and the daemon logs `wire gate OPEN` at startup. Two keys because a config
+  and the daemon's banner says `wire gate OPEN` at startup. Opening the gate
+  lets *answers* through; the engine's own allow verdicts need a further
+  `autoAllow`, still off. Two keys because a config
   edit meant to change `speechInterval` must not be able to open it by typo.
 - End-to-end test against the real socket and real hook binary: parked, still
   waiting after 1 s, answered from another connection, hook prints `allow`,
-  exits 0. Then unanswered: prints `escalate`, exits 0, takes ~deadline. Then
+  exits 0. Then unanswered: prints nothing, exits 0, takes ~deadline. Then
   daemon killed mid-question: exits 0.
 
 ## Milestone 2 — a nod, measured
