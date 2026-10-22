@@ -11,17 +11,25 @@ public struct BashRule: Sendable, Equatable {
     /// matches once command and subcommand line up.
     public let anyFlag: [String]
     public let reason: String
+    /// Also match `/some/path/<command>`. Off by default: a path cannot
+    /// promise what it will contain, so the table does not vouch for one.
+    /// On for a rule that only ever flags *more*, where the installed binary
+    /// is routinely called by its full path.
+    public let byPath: Bool
 
     public init(_ command: String, _ subcommand: String? = nil,
-                anyFlag: [String] = [], reason: String) {
+                anyFlag: [String] = [], byPath: Bool = false, reason: String) {
         self.command = command
         self.subcommand = subcommand
         self.anyFlag = anyFlag
+        self.byPath = byPath
         self.reason = reason
     }
 
     public func matches(tokens: [String]) -> Bool {
-        guard let first = tokens.first, first == command else { return false }
+        guard let first = tokens.first,
+              first == command || (byPath && first.hasSuffix("/" + command))
+        else { return false }
         if let subcommand {
             guard tokens.count > 1, tokens[1] == subcommand else { return false }
         }
@@ -72,6 +80,12 @@ public enum BashRules {
         // follows it runs as root — which is worth hearing about regardless of
         // whether the rest of the table recognises the command.
         BashRule("sudo", reason: "run something as root"),
+        // This tool's own answer and gate commands. An agent with Bash can run
+        // them; the classifier cannot stop that, but it can make sure it is
+        // never quiet. The asking session is blocked and cannot answer itself;
+        // a second session or a background process could, and this is the
+        // one place that would show.
+        BashRule("navigator", byPath: true, reason: "act on the navigator itself"),
     ]
 
     /// Case-insensitive substrings checked against the whole segment. These

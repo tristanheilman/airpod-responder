@@ -69,6 +69,23 @@ import Testing
         }
     }
 
+    @Test(arguments: [
+        "navigator approve", "navigator deny", "navigator gate --open",
+        "~/.claude/bin/navigator approve",
+    ])
+    func answeringOnTheDaemonsBehalfIsNeverSilent(_ command: String) {
+        // An agent with Bash can run this tool's own commands. It cannot
+        // answer the question it is parked behind, but a background process
+        // or a second session could, and could open the gate for itself.
+        // The classifier cannot stop that; it can make sure it is never
+        // quiet. Paths are matched too, because the installed binary is
+        // called by path.
+        guard case .irreversible(let why) = bash(command) else {
+            Issue.record("silent on: \(command)"); return
+        }
+        #expect(why.contains("navigator"))
+    }
+
     @Test func unrecognisedCommandIsUnknown() {
         guard case .unknown = bash("frobnicate --widget 3") else {
             Issue.record("expected unknown")
