@@ -62,7 +62,58 @@ import Testing
         #expect(done.wait(timeout: .now() + 10) == .success)
         #expect(reply.value?.output?.contains("allow") == true)
         // It asked before it waited — a question you never heard is a stall.
-        #expect(speaker.spoken.contains { $0.contains("Approve?") })
+        // And it asked once: hearing "Approve?" again after approving invites
+        // a second approve, which could land on the next question.
+        #expect(speaker.spoken.filter { $0.contains("Approve?") }.count == 1)
+    }
+
+    @Test func theRealEventOrderParksOnPermissionRequest() throws {
+        // Claude Code fires PreToolUse and then PermissionRequest for the same
+        // call, milliseconds apart. Every other test here sends the second
+        // alone; this is the order a real session produces, and the first
+        // version of this branch never parked in it — PreToolUse took the
+        // in-flight slot and the real question was suppressed as a duplicate.
+        let path = tempPath()
+        let speaker = RecordingSpeaker()
+        let server = try makeServer(path, open: true, speaker: speaker)
+        defer { server.stop() }
+
+        let first = try send(path, force(at: Date(), kind: .preToolUse))
+        #expect(first.output == nil)
+
+        let reply = Box<NavigatorResponse?>(nil)
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            reply.value = try? self.send(path, self.force(at: Date()))
+            done.signal()
+        }
+        Thread.sleep(forTimeInterval: 0.6)
+        _ = try send(path, .control(.approve, at: Date()))
+
+        #expect(done.wait(timeout: .now() + 10) == .success)
+        #expect(reply.value?.output?.contains("allow") == true, "the real order did not park")
+
+        // One sentence, the question. Not a heads-up and then a question.
+        Thread.sleep(forTimeInterval: 0.2)
+        let aboutIt = speaker.spoken.filter { $0.contains("force push") }
+        #expect(aboutIt.count == 1, "spoken: \(speaker.spoken)")
+        #expect(aboutIt.first?.contains("Approve?") == true)
+    }
+
+    @Test func aHeadsUpStillSpeaksWhenNoQuestionFollows() throws {
+        // In auto mode nothing needs permission, so PermissionRequest never
+        // fires. The PreToolUse heads-up is then the only warning you get
+        // about a force push, and it must not be lost to the de-duplication.
+        let path = tempPath()
+        let speaker = RecordingSpeaker()
+        let server = try makeServer(path, open: true, speaker: speaker)
+        defer { server.stop() }
+
+        _ = try send(path, force(at: Date(), kind: .preToolUse))
+        Thread.sleep(forTimeInterval: 1.0)
+
+        #expect(speaker.spoken.contains { $0.contains("about to force push") },
+                "spoken: \(speaker.spoken)")
     }
 
     @Test func anUnansweredQuestionReleasesTheAgent() throws {

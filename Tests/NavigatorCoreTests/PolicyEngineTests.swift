@@ -432,10 +432,12 @@ extension PolicyEngineBehavior {
         return engine
     }
 
-    private func force(_ subject: inout PolicyEngine) -> Decision {
+    private func force(
+        _ subject: inout PolicyEngine, kind: HookEventKind = .preToolUse
+    ) -> Decision {
         subject.decide(StampedEvent(
             event: HookEvent(
-                kind: .preToolUse, sessionID: "s1", cwd: "/p", toolName: "Bash",
+                kind: kind, sessionID: "s1", cwd: "/p", toolName: "Bash",
                 toolInput: ["command": .string("git push --force")]),
             at: t0))
     }
@@ -453,12 +455,53 @@ extension PolicyEngineBehavior {
     }
 
     @Test func itAsksOnceItCanActuallyTakeAnAnswer() {
+        // The question belongs on PermissionRequest: the event that fires only
+        // when a decision is genuinely needed, and the one the daemon holds.
+        var config = PolicyConfig.default
+        config.canAcceptAnswers = true
+        var subject = engine(config)
+        let decision = force(&subject, kind: .permissionRequest)
+
+        #expect(decision.utterance?.contains("Approve?") == true)
+    }
+
+    @Test func preToolUseIsAHeadsUpEvenWhenItCanTakeAnswers() {
+        // Claude Code fires PreToolUse first, then PermissionRequest. Asking on
+        // the first would ask twice; in auto mode "check your screen" would
+        // point at nothing. So: a plain heads-up, which the daemon drops if
+        // the question follows.
         var config = PolicyConfig.default
         config.canAcceptAnswers = true
         var subject = engine(config)
         let decision = force(&subject)
 
-        #expect(decision.utterance?.contains("Approve?") == true)
+        #expect(decision.tier == .decisionPoint)
+        #expect(decision.utterance?.contains("about to force push") == true)
+        #expect(decision.utterance?.contains("Approve?") == false)
+        #expect(decision.utterance?.contains("screen") == false)
+    }
+
+    @Test func aHeadsUpDoesNotBlockTheQuestionThatFollowsIt() {
+        // The in-flight slot is for questions. A heads-up taking it meant the
+        // real PermissionRequest arrived as "another question is in flight".
+        var config = PolicyConfig.default
+        config.canAcceptAnswers = true
+        var subject = engine(config)
+        _ = force(&subject)
+        let question = force(&subject, kind: .permissionRequest)
+
+        #expect(question.blocking, "suppressed as: \(question.reason)")
+    }
+
+    @Test func withoutAnAnswerChannelPermissionRequestAddsNothing() {
+        // The heads-up already went out on PreToolUse. Saying it again on the
+        // next event is the double-announcement this exists to prevent.
+        var subject = engine(.default)
+        _ = force(&subject)
+        let again = force(&subject, kind: .permissionRequest)
+
+        #expect(again.tier == .silent)
+        #expect(again.reason.contains("already announced"))
     }
 
     @Test func theHeadsUpStillSaysWhatIsHappening() {

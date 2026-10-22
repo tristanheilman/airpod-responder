@@ -33,6 +33,16 @@ public final class NavigatorServer: @unchecked Sendable {
     /// connections — a terminal today, a nod later — and resolve it here.
     private let desk = QuestionDesk()
 
+    /// PreToolUse heads-ups waiting to see whether a PermissionRequest for the
+    /// same session follows. Keyed by session; the token tells a delayed
+    /// announcement whether it is still the current one.
+    private var headsUps: [String: UUID] = [:]
+
+    /// How long a heads-up waits for the question that usually supersedes it.
+    /// Claude Code fires the two events milliseconds apart, so this is
+    /// generous; it is also how late the warning arrives in auto mode.
+    static let headsUpGrace: TimeInterval = 0.5
+
     private let stateLock = NSLock()
     private var listener: UnixSocket?
     private var running = false
@@ -162,6 +172,12 @@ public final class NavigatorServer: @unchecked Sendable {
         lock.unlock()
 
         let kind = stamped.event.kind
+        let sessionID = stamped.event.sessionID
+
+        if kind == .permissionRequest {
+            // The question is here; the heads-up for it is no longer needed.
+            lock.lock(); headsUps[sessionID] = nil; lock.unlock()
+        }
 
         // A decision point stops the agent on purpose — an approval that
         // arrives after the command ran is not an approval. Everything else
@@ -177,8 +193,8 @@ public final class NavigatorServer: @unchecked Sendable {
                 // The question would go unspoken. Holding the agent behind a
                 // question you cannot hear is a stall with no payoff.
                 (answer, source) = (.escalate, nil)
-            } else if desk.park(PendingQuestion(sessionName: sessionName, text: utterance)) {
-                let question = desk.current!
+            } else if case let question = PendingQuestion(sessionName: sessionName, text: utterance),
+                      desk.park(question) {
                 audio.async { [self] in speaker.say(utterance) }
                 answer = question.wait(timeout: config.questionDeadline)
                 source = question.answeredBy
@@ -193,7 +209,34 @@ public final class NavigatorServer: @unchecked Sendable {
             record = record?.answered(answer ?? .escalate, by: source)
             reply(on: connection, NavigatorResponse(
                 output: encode(answer, for: kind, decision: decision)))
-            announce(decision, sessionName: sessionName, at: stamped.at)
+
+            // Already spoken, once, at park time. Recorded for repeat and
+            // catch-up without going through the announcer, which would say
+            // it again — and "Approve?" after the answer invites a second
+            // approve that lands on the next question.
+            lock.lock()
+            _transcript.record(Utterance(
+                at: stamped.at, sessionName: sessionName, text: utterance,
+                tier: decision.tier, wasSpoken: source != nil || answer == nil))
+            lock.unlock()
+            append(record)
+            return
+        }
+
+        if kind == .preToolUse, decision.blocking, config.canAcceptAnswers {
+            // A heads-up that is probably about to be superseded by the real
+            // question. Hold it briefly; speak it only if nothing follows.
+            reply(on: connection, NavigatorResponse(output: nil))
+            let token = UUID()
+            lock.lock(); headsUps[sessionID] = token; lock.unlock()
+            audio.asyncAfter(deadline: .now() + Self.headsUpGrace) { [self] in
+                lock.lock()
+                let current = headsUps[sessionID] == token
+                if current { headsUps[sessionID] = nil }
+                lock.unlock()
+                guard current else { return }
+                announceNow(decision, sessionName: sessionName, at: stamped.at)
+            }
             append(record)
             return
         }
@@ -232,25 +275,28 @@ public final class NavigatorServer: @unchecked Sendable {
     }
 
     private func announce(_ decision: Decision, sessionName: String, at: Date) {
-        audio.async { [self] in
-            // Checked per utterance rather than once at startup: whether you are
-            // on a call changes minute to minute, which is the whole point.
-            let onACall = microphoneIsBusy()
-            let active = onACall ? silentAnnouncer : announcer
+        audio.async { [self] in announceNow(decision, sessionName: sessionName, at: at) }
+    }
 
-            guard let utterance = active.announce(
-                decision, sessionName: sessionName, at: at) else { return }
+    /// Runs on the audio queue.
+    private func announceNow(_ decision: Decision, sessionName: String, at: Date) {
+        // Checked per utterance rather than once at startup: whether you are
+        // on a call changes minute to minute, which is the whole point.
+        let onACall = microphoneIsBusy()
+        let active = onACall ? silentAnnouncer : announcer
 
-            // Still recorded, but marked unheard — so catch-up can tell you what
-            // happened while you were talking to someone.
-            let recorded = onACall
-                ? Utterance(
-                    at: utterance.at, sessionName: utterance.sessionName,
-                    text: utterance.text, tier: utterance.tier, wasSpoken: false)
-                : utterance
+        guard let utterance = active.announce(
+            decision, sessionName: sessionName, at: at) else { return }
 
-            lock.lock(); _transcript.record(recorded); lock.unlock()
-        }
+        // Still recorded, but marked unheard — so catch-up can tell you what
+        // happened while you were talking to someone.
+        let recorded = onACall
+            ? Utterance(
+                at: utterance.at, sessionName: utterance.sessionName,
+                text: utterance.text, tier: utterance.tier, wasSpoken: false)
+            : utterance
+
+        lock.lock(); _transcript.record(recorded); lock.unlock()
     }
 
     private func append(_ record: DecisionRecord?) {

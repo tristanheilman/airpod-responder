@@ -39,6 +39,19 @@ public struct PolicyEngine: Sendable {
 
     public mutating func setMuted(_ muted: Bool) { self.muted = muted }
 
+    /// Which event carries the question.
+    ///
+    /// Claude Code fires PreToolUse and then PermissionRequest for one call.
+    /// With an answer channel the question belongs on PermissionRequest — the
+    /// event that fires only when a decision is genuinely needed, and the one
+    /// the daemon holds open. PreToolUse is then a heads-up, and must not take
+    /// the in-flight slot or the real question arrives as a duplicate. With no
+    /// answer channel there is nothing to hold, and PreToolUse is the one
+    /// warning you get.
+    private var askingKind: HookEventKind {
+        canAcceptAnswers ? .permissionRequest : .preToolUse
+    }
+
     /// Called by the daemon once the live question has been answered.
     public mutating func resolveQuestion() { questionAskedAt = nil }
 
@@ -72,7 +85,7 @@ public struct PolicyEngine: Sendable {
 
         let (delivered, suppression) = deliver(verdict, event: event, at: stamped.at)
 
-        if delivered.isBlocking { questionAskedAt = stamped.at }
+        if delivered.isBlocking, event.kind == askingKind { questionAskedAt = stamped.at }
 
         let decision = Decision(
             tier: delivered,
@@ -120,7 +133,13 @@ public struct PolicyEngine: Sendable {
             return (.silent, "muted — deferred to screen")
         }
 
-        if verdict.tier.isBlocking, let asked = questionAskedAt,
+        if verdict.tier.isBlocking, !canAcceptAnswers, event.kind == .permissionRequest {
+            // The heads-up already went out on PreToolUse a moment ago, and
+            // without an answer channel this event has nothing to add.
+            return (.silent, "already announced at PreToolUse")
+        }
+
+        if verdict.tier.isBlocking, event.kind == askingKind, let asked = questionAskedAt,
            now.timeIntervalSince(asked) < questionDeadline {
             // Stalling an agent behind another agent's ten-second exchange is
             // worse than showing a prompt. Bounded by the deadline: an
@@ -196,9 +215,15 @@ public struct PolicyEngine: Sendable {
             // Only ask when an answer can reach us. Otherwise this is a heads-up
             // and should say so, or it invites a reply into a void.
             let what = Self.programName(of: event).map { " Running \($0)." } ?? ""
+            if canAcceptAnswers, event.kind == .permissionRequest {
+                return "\(name) wants to \(verdict.reason).\(what) Approve?"
+            }
+            // A heads-up. With an answer channel the question follows on
+            // PermissionRequest if one is needed; "check your screen" would
+            // be wrong in auto mode, where there is nothing on it to check.
             return canAcceptAnswers
-                ? "\(name) wants to \(verdict.reason).\(what) Approve?"
-                : "\(name) is about to \(verdict.reason).\(what) Check your screen." 
+                ? "\(name) is about to \(verdict.reason).\(what)"
+                : "\(name) is about to \(verdict.reason).\(what) Check your screen."
         case .needsInput:
             return "\(name) needs you."
         case .speak:
