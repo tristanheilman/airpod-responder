@@ -60,12 +60,24 @@ has been run with AirPods in and its output recorded in this doc.
 
 ### 1a. The spike (already written, needs your hardware)
 
-`spikes/head-motion/run.sh`. Record here: whether the permission prompt
-appears, what `authorizationStatus` becomes, the sample rate it delivers, and
-whether `pitch`/`yaw` visibly track a nod and a shake. Also whether updates
-still arrive when the binary is launched by launchd rather than Terminal —
-TCC attributes an unbundled binary to its responsible process, and a daemon
-that only has motion access when started from a terminal is not a daemon.
+`spikes/head-motion/run.sh` and `launchd.sh`. **Run 2026-10-25, AirPods 4
+(non-ANC), macOS 26.6:**
+
+- A one-time macOS prompt appears; `authorizationStatus` becomes 3. The
+  embedded `NSMotionUsageDescription` is sufficient; no bundle, no entitlement.
+- **~50 samples/s**, from Terminal *and* from a launchd-started unbundled
+  binary. No `.app` wrapper is needed; motion lives in the daemon. (launchd
+  prints `authorizationStatus: 0` at startup — it is read before the
+  CoreMotion service connects — and 3 thereafter, with data flowing.)
+- Nod → `rotationRate.x` (±1.2–1.9 rad/s). Shake and look-around →
+  `rotationRate.z` (±1.3–2.3). A still head sits under ±0.05. Attitude
+  (`pitch`/`yaw`) tracks too but drifts; the detector uses rotation rate.
+- **Operational catch:** AirPods stream only while routed to the Mac with
+  audio active. On the phone they deliver nothing; idle, they drift back.
+  The spoken question pulls them over, and that handover took ~2 s on the
+  first run — a real input to milestone 3's start-on-park timing. The spike
+  scripts play speech during the run for this reason.
+- `sensorLocation` reports 2 (right bud) throughout.
 
 **Native surface it adds:** `CoreMotion.CMHeadphoneMotionManager`, and an
 `NSMotionUsageDescription` embedded in the `navigator` binary via

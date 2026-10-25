@@ -13,6 +13,9 @@ final class Delegate: NSObject, CMHeadphoneMotionManagerDelegate {
 let manager = CMHeadphoneMotionManager()
 let delegate = Delegate()
 manager.delegate = delegate
+// Without this the connect/disconnect delegate callbacks never fire on macOS,
+// and the connection status is the first thing to know when no samples come.
+if #available(macOS 15.0, *) { manager.startConnectionStatusUpdates() }
 print("isDeviceMotionAvailable:", manager.isDeviceMotionAvailable)
 print("authorizationStatus:", CMHeadphoneMotionManager.authorizationStatus().rawValue,
       "(0 notDetermined, 1 restricted, 2 denied, 3 authorized)")
@@ -26,7 +29,7 @@ manager.startDeviceMotionUpdates(to: .main) { motion, error in
     received += 1
     let now = Date()
     if now.timeIntervalSince(windowStart) >= 1 {
-        print("rate: \(received) samples/s")
+        print("rate: \(received) samples/s  (sensorLocation \(m.sensorLocation.rawValue))")
         received = 0; windowStart = now
     }
     guard now.timeIntervalSince(lastPrint) >= 0.2 else { return }
@@ -39,6 +42,12 @@ manager.startDeviceMotionUpdates(to: .main) { motion, error in
 // non-interactively (from `! ...` in a session, or from launchd) and still end.
 if let seconds = CommandLine.arguments.dropFirst().first.flatMap(Double.init) {
     print("running for \(Int(seconds))s — nod a few times, shake a few times, then sit still")
+    // A heartbeat, so a silent run says *why* it is silent.
+    var ticks = 0
+    Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+        ticks += 5
+        print("t=\(ticks)s  active: \(manager.isDeviceMotionActive)  available: \(manager.isDeviceMotionAvailable)  auth: \(CMHeadphoneMotionManager.authorizationStatus().rawValue)")
+    }
     DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
         print("done; stopping updates")
         exit(0)
