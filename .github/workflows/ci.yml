@@ -1,0 +1,24 @@
+name: CI
+
+# Build and test on every PR and on main. GitHub's macOS runners are free for
+# a public repo; the package is macOS-only (CoreMotion, AVFoundation).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift build
+      # One test at a time: the suite's concurrency tests wait a few seconds each,
+      # and run side by side on a 3-core hosted runner they starved and timed out.
+      - run: swift test --no-parallel
